@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readUsers } from "@/lib/server/store";
+import { readUsers, getAdminUsername } from "@/lib/server/store";
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,22 +15,8 @@ export async function POST(req: NextRequest) {
     const cleanUsername = String(username).trim().toLowerCase();
     const cleanPassword = String(password).trim();
 
-    // Direct check for main admin default credentials
-    if (cleanUsername === "01706338181" && cleanPassword === "8181") {
-      return NextResponse.json({
-        success: true,
-        user: {
-          id: "admin_01706338181",
-          username: "01706338181",
-          isAdmin: true,
-          isBlocked: false,
-          createdAt: Date.now(),
-          scanCount: 0,
-        },
-      });
-    }
-
-    const users = readUsers();
+    // Fetch all users from Firestore (includes seeded admin)
+    const users = await readUsers();
     const user = users.find((u) => u.username.toLowerCase() === cleanUsername);
 
     if (!user || user.password !== cleanPassword) {
@@ -59,6 +45,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err: any) {
+    console.error("[Login API] Error:", err);
     return NextResponse.json(
       { error: err.message || "Login failed" },
       { status: 500 }

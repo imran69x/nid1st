@@ -119,7 +119,11 @@ Rules:
     }
 
     if (userId || username) {
-      incrementUserScanCount(userId || username, imageList.length);
+      try {
+        await incrementUserScanCount(userId || username, imageList.length);
+      } catch (e) {
+        console.warn("Failed to increment scan count:", e);
+      }
     }
 
     return NextResponse.json({

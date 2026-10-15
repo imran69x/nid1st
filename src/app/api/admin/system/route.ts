@@ -2,25 +2,34 @@ import { NextRequest, NextResponse } from "next/server";
 import { readSystemConfig, writeSystemConfig } from "@/lib/server/store";
 
 export async function GET() {
-  const config = readSystemConfig();
-  return NextResponse.json(config);
+  try {
+    const config = await readSystemConfig();
+    return NextResponse.json(config);
+  } catch (err: any) {
+    console.error("[System Config GET] Error:", err);
+    return NextResponse.json(
+      { scanningEnabled: true, noticeMessage: "System operational." },
+      { status: 200 }
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const config = readSystemConfig();
+    const config = await readSystemConfig();
 
     if (typeof body.scanningEnabled === "boolean") {
       config.scanningEnabled = body.scanningEnabled;
     }
-    if (body.noticeMessage) {
+    if (body.noticeMessage !== undefined) {
       config.noticeMessage = body.noticeMessage;
     }
 
-    writeSystemConfig(config);
+    await writeSystemConfig(config);
     return NextResponse.json({ success: true, config });
   } catch (err: any) {
+    console.error("[System Config POST] Error:", err);
     return NextResponse.json(
       { error: err.message || "Failed to update system config" },
       { status: 500 }

@@ -1,12 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readUsers, writeUsers } from "@/lib/server/store";
+import {
+  readUsers,
+  writeUser,
+  deleteUser,
+  findUserByUsername,
+  findUserById,
+  getAdminUsername,
+} from "@/lib/server/store";
 import { DatabaseUser } from "@/types/user";
 
+// GET: Fetch all users from Firestore
 export async function GET() {
-  const users = readUsers();
-  return NextResponse.json({ users });
+  try {
+    const users = await readUsers();
+    return NextResponse.json({ users });
+  } catch (err: any) {
+    console.error("[Admin Users GET] Error:", err);
+    return NextResponse.json(
+      { error: err.message || "Failed to load users" },
+      { status: 500 }
+    );
+  }
 }
 
+// POST: Create a new user in Firestore
 export async function POST(req: NextRequest) {
   try {
     const { username, password, isAdmin } = await req.json();
@@ -21,8 +38,9 @@ export async function POST(req: NextRequest) {
     const cleanUsername = String(username).trim();
     const cleanPassword = String(password).trim();
 
-    const users = readUsers();
-    if (users.some((u) => u.username.toLowerCase() === cleanUsername.toLowerCase())) {
+    // Check if username already exists
+    const existingUser = await findUserByUsername(cleanUsername);
+    if (existingUser) {
       return NextResponse.json(
         { error: "User ID already exists." },
         { status: 400 }
@@ -39,11 +57,12 @@ export async function POST(req: NextRequest) {
       scanCount: 0,
     };
 
-    users.push(newUser);
-    writeUsers(users);
+    // Write to Firestore
+    await writeUser(newUser);
 
     return NextResponse.json({ success: true, user: newUser });
   } catch (err: any) {
+    console.error("[Admin Users POST] Error:", err);
     return NextResponse.json(
       { error: err.message || "Failed to create user" },
       { status: 500 }
@@ -51,7 +70,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Update password
+// PUT: Update password for a user
 export async function PUT(req: NextRequest) {
   try {
     const { userId, newPassword } = await req.json();
@@ -71,15 +90,18 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    const users = readUsers();
-    const targetUser = users.find((u) => u.id === userId || u.username === userId);
+    // Try to find user by ID first, then by username
+    let targetUser = await findUserById(userId);
+    if (!targetUser) {
+      targetUser = await findUserByUsername(userId);
+    }
 
     if (!targetUser) {
       return NextResponse.json({ error: "User not found." }, { status: 404 });
     }
 
     targetUser.password = cleanPassword;
-    writeUsers(users);
+    await writeUser(targetUser);
 
     return NextResponse.json({
       success: true,
@@ -91,6 +113,7 @@ export async function PUT(req: NextRequest) {
       },
     });
   } catch (err: any) {
+    console.error("[Admin Users PUT] Error:", err);
     return NextResponse.json(
       { error: err.message || "Failed to update password" },
       { status: 500 }
@@ -98,18 +121,23 @@ export async function PUT(req: NextRequest) {
   }
 }
 
-// Toggle block/lock
+// PATCH: Toggle block/lock status
 export async function PATCH(req: NextRequest) {
   try {
     const { userId, isBlocked } = await req.json();
-    const users = readUsers();
 
-    const targetUser = users.find((u) => u.id === userId || u.username === userId);
+    // Try to find user by ID first, then by username
+    let targetUser = await findUserById(userId);
+    if (!targetUser) {
+      targetUser = await findUserByUsername(userId);
+    }
+
     if (!targetUser) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    if (targetUser.username === "01706338181") {
+    const adminUsername = getAdminUsername();
+    if (targetUser.username === adminUsername) {
       return NextResponse.json(
         { error: "Cannot block main admin user." },
         { status: 400 }
@@ -117,10 +145,11 @@ export async function PATCH(req: NextRequest) {
     }
 
     targetUser.isBlocked = Boolean(isBlocked);
-    writeUsers(users);
+    await writeUser(targetUser);
 
     return NextResponse.json({ success: true, user: targetUser });
   } catch (err: any) {
+    console.error("[Admin Users PATCH] Error:", err);
     return NextResponse.json(
       { error: err.message || "Failed to update user status" },
       { status: 500 }
@@ -128,7 +157,7 @@ export async function PATCH(req: NextRequest) {
   }
 }
 
-// Delete user
+// DELETE: Delete a user
 export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -138,20 +167,27 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "User ID required" }, { status: 400 });
     }
 
-    let users = readUsers();
-    const targetUser = users.find((u) => u.id === userId || u.username === userId);
-    if (targetUser?.username === "01706338181") {
+    // Find the user first
+    let targetUser = await findUserById(userId);
+    if (!targetUser) {
+      targetUser = await findUserByUsername(userId);
+    }
+
+    const adminUsername = getAdminUsername();
+    if (targetUser?.username === adminUsername) {
       return NextResponse.json(
         { error: "Cannot delete main admin user." },
         { status: 400 }
       );
     }
 
-    users = users.filter((u) => u.id !== userId && u.username !== userId);
-    writeUsers(users);
+    if (targetUser) {
+      await deleteUser(targetUser.id);
+    }
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
+    console.error("[Admin Users DELETE] Error:", err);
     return NextResponse.json(
       { error: err.message || "Failed to delete user" },
       { status: 500 }

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect } from "react";
 import { useUserAuth } from "@/lib/services/userAuthContext";
@@ -111,8 +111,8 @@ export default function AdminPage() {
   };
 
   const handleToggleBlock = async (user: DatabaseUser) => {
-    if (user.username === "01706338181") {
-      toast.error("You cannot block the main admin account!");
+    if (user.username === currentUser?.username && user.isAdmin) {
+      toast.error("You cannot block your own admin account!");
       return;
     }
 
@@ -133,8 +133,8 @@ export default function AdminPage() {
   };
 
   const handleDeleteUser = async (user: DatabaseUser) => {
-    if (user.username === "01706338181") {
-      toast.error("You cannot delete the main admin account!");
+    if (user.username === currentUser?.username && user.isAdmin) {
+      toast.error("You cannot delete your own admin account!");
       return;
     }
 
@@ -176,7 +176,7 @@ export default function AdminPage() {
 
     setUpdatingMyPassword(true);
     try {
-      await changeUserPassword("01706338181", myNewPassword.trim());
+      await changeUserPassword(currentUser?.id || currentUser?.username || "", myNewPassword.trim());
       toast.success("অ্যাডমিনের পাসওয়ার্ড সফলভাবে পরিবর্তিত হয়েছে!");
       setMyNewPassword("");
       await loadUsers();
@@ -325,7 +325,7 @@ export default function AdminPage() {
               <span>Change Admin Password</span>
             </div>
             <p className="text-xs text-slate-500 mb-4">
-              অ্যাডমিন অ্যাকাউন্ট (01706338181)-এর নতুন পাসওয়ার্ড সেট করুন।
+              অ্যাডমিন অ্যাকাউন্ট ({currentUser?.username})-এর নতুন পাসওয়ার্ড সেট করুন।
             </p>
 
             <form onSubmit={handleChangeMyAdminPassword} className="space-y-3">
@@ -376,7 +376,7 @@ export default function AdminPage() {
           ) : (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs divide-y divide-slate-100 overflow-hidden">
               {users.map((u) => {
-                const isSelf = u.username === "01706338181";
+                const isSelf = u.username === currentUser?.username;
                 return (
                   <div
                     key={u.id}
