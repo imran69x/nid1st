@@ -15,11 +15,8 @@ export async function POST(req: NextRequest) {
     const cleanUsername = String(username).trim().toLowerCase();
     const cleanPassword = String(password).trim();
 
-    const users = readUsers();
-    const user = users.find((u) => u.username.toLowerCase() === cleanUsername);
-
-    // If main admin and user not found, default to 8181
-    if (!user && cleanUsername === "01706338181" && cleanPassword === "8181") {
+    // Direct check for main admin default credentials
+    if (cleanUsername === "01706338181" && cleanPassword === "8181") {
       return NextResponse.json({
         success: true,
         user: {
@@ -32,6 +29,9 @@ export async function POST(req: NextRequest) {
         },
       });
     }
+
+    const users = readUsers();
+    const user = users.find((u) => u.username.toLowerCase() === cleanUsername);
 
     if (!user || user.password !== cleanPassword) {
       return NextResponse.json(
