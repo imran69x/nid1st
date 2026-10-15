@@ -28,8 +28,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="bn" className={`${inter.variable} ${notoSansBengali.variable}`}>
-      <body className="min-h-screen bg-slate-50 font-sans antialiased text-slate-900 flex flex-col">
+    <html
+      lang="bn"
+      className={`${inter.variable} ${notoSansBengali.variable}`}
+      suppressHydrationWarning
+    >
+      <body
+        className="min-h-screen bg-slate-50 font-sans antialiased text-slate-900 flex flex-col"
+        suppressHydrationWarning
+      >
         <UserAuthProvider>
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
           <HeaderAndSidebar />
