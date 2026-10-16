@@ -153,3 +153,68 @@ export async function cropImageToBox(
 
   return canvas.toDataURL("image/jpeg", 0.95);
 }
+
+/**
+ * Compresses an image file or dataUrl to an optimal size and resolution for OCR.
+ * Resizes large camera photos (e.g. 12MP-50MP from phones/tablets) down to max 1600px
+ * and compresses as JPEG with 0.82 quality. This reduces 5-10MB files to ~150-250KB,
+ * keeping text razor-sharp while preventing Vercel's 4.5MB 413 Payload Too Large error.
+ */
+export async function compressImageForUpload(
+  fileOrDataUrl: File | string,
+  maxWidth = 1600,
+  maxHeight = 1600,
+  quality = 0.82
+): Promise<string> {
+  let objectUrlToRevoke: string | null = null;
+  let src: string;
+
+  if (typeof fileOrDataUrl === "string") {
+    src = fileOrDataUrl;
+  } else {
+    src = URL.createObjectURL(fileOrDataUrl);
+    objectUrlToRevoke = src;
+  }
+
+  try {
+    const img = await loadImage(src);
+    let width = img.naturalWidth || img.width;
+    let height = img.naturalHeight || img.height;
+
+    // Scale down if larger than maxWidth or maxHeight
+    if (width > maxWidth || height > maxHeight) {
+      if (width / height > maxWidth / maxHeight) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      } else {
+        width = Math.round((width * maxHeight) / height);
+        height = maxHeight;
+      }
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Could not get 2D canvas context for compression");
+    }
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+
+    // Fill white background in case source is transparent PNG / WebP
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.drawImage(img, 0, 0, width, height);
+
+    return canvas.toDataURL("image/jpeg", quality);
+  } finally {
+    if (objectUrlToRevoke) {
+      URL.revokeObjectURL(objectUrlToRevoke);
+    }
+  }
+}
+

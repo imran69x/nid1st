@@ -24,4 +24,6 @@ export interface ExtractedMember {
   motherNameEnglish: string;
   nidNumber: string;
   dateOfBirth: string; // strictly DD-MM-YYYY
+  error?: string;
 }
+

@@ -20,6 +20,7 @@ import toast from "react-hot-toast";
 
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { compressImageForUpload } from "@/lib/ocr/imagePreprocess";
 
 interface ImageItem {
   id: string;
@@ -34,6 +35,7 @@ export default function ScannerHomePage() {
   // Selected images to scan
   const [selectedImages, setSelectedImages] = useState<ImageItem[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [members, setMembers] = useState<ExtractedMember[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
 
@@ -51,34 +53,102 @@ export default function ScannerHomePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  // Handle image files selection
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle image files selection with automatic compression (reduces 5-10MB camera files to ~180KB)
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const newItems: ImageItem[] = [];
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setSelectedImages((prev) => [
-            ...prev,
-            {
-              id: "img_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
-              dataUrl: event.target!.result as string,
-              name: file.name,
-            },
-          ]);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+    const fileList = Array.from(files);
+    e.target.value = ""; // Reset input so same files can be re-selected if necessary
 
-    // Reset input
-    e.target.value = "";
+    setIsProcessingFiles(true);
+    const toastId = toast.loading(`Optimizing ${fileList.length} document(s)...`);
+
+    try {
+      const compressedList: ImageItem[] = [];
+
+      for (let i = 0; i < fileList.length; i++) {
+        const file = fileList[i];
+        if (fileList.length > 1) {
+          toast.loading(`Optimizing document ${i + 1} of ${fileList.length}...`, { id: toastId });
+        }
+        // Resizes down large camera/tablet images to max 1600px (~150-250KB JPEG)
+        const compressedDataUrl = await compressImageForUpload(file);
+        compressedList.push({
+          id: "img_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6) + "_" + i,
+          dataUrl: compressedDataUrl,
+          name: file.name,
+        });
+      }
+
+      if (hasScanned) {
+        // If user is already on results screen and clicks "Add Another", automatically scan newly added card(s) and append
+        setIsScanning(true);
+        const newMembers: ExtractedMember[] = [];
+        const totalNew = compressedList.length;
+
+        for (let i = 0; i < totalNew; i++) {
+          toast.loading(`Scanning new document ${i + 1} of ${totalNew}...`, { id: toastId });
+
+          try {
+            const res = await fetch("/api/ocr", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                image: compressedList[i].dataUrl,
+                userId: currentUser?.id,
+                username: currentUser?.username,
+              }),
+            });
+
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              throw new Error(errData.error || `Scan failed with status ${res.status}`);
+            }
+
+            const data = await res.json();
+            if (data.members && Array.isArray(data.members)) {
+              data.members.forEach((m: any) => {
+                newMembers.push({
+                  ...m,
+                  memberIndex: members.length + newMembers.length + 1,
+                });
+              });
+            }
+          } catch (docErr: any) {
+            newMembers.push({
+              memberIndex: members.length + newMembers.length + 1,
+              docType: "nid",
+              nameBangla: "",
+              nameEnglish: "",
+              fatherNameBangla: "",
+              fatherNameEnglish: "",
+              motherNameBangla: "",
+              motherNameEnglish: "",
+              nidNumber: "",
+              dateOfBirth: "",
+              error: docErr?.message || "Failed to scan document",
+            });
+          }
+        }
+
+        setSelectedImages((prev) => [...prev, ...compressedList]);
+        setMembers((prev) => [...prev, ...newMembers]);
+        toast.success(`Successfully added ${newMembers.length} member(s)!`, { id: toastId });
+      } else {
+        setSelectedImages((prev) => [...prev, ...compressedList]);
+        toast.success(`${compressedList.length} document(s) ready to scan!`, { id: toastId });
+      }
+    } catch (err: any) {
+      console.error("Image processing error:", err);
+      toast.error(err.message || "Failed to process image(s)", { id: toastId });
+    } finally {
+      setIsProcessingFiles(false);
+      setIsScanning(false);
+    }
   };
 
-  // 1. SCAN ACTION
+  // 1. SCAN ACTION (Processed document-by-document to prevent Vercel 4.5MB 413 Payload limit and timeouts)
   const handleScan = async () => {
     if (!systemConfig.scanningEnabled) {
       toast.error("Scanning feature is currently disabled by Admin.");
@@ -94,26 +164,59 @@ export default function ScannerHomePage() {
     const toastId = toast.loading(`Scanning ${selectedImages.length} document(s)...`);
 
     try {
-      const res = await fetch("/api/ocr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          images: selectedImages.map((img) => img.dataUrl),
-          userId: currentUser?.id,
-          username: currentUser?.username,
-        }),
-      });
+      const allMembers: ExtractedMember[] = [];
+      const total = selectedImages.length;
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Scan failed with status ${res.status}`);
+      for (let i = 0; i < total; i++) {
+        toast.loading(`Scanning document ${i + 1} of ${total}...`, { id: toastId });
+
+        try {
+          const res = await fetch("/api/ocr", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              image: selectedImages[i].dataUrl,
+              userId: currentUser?.id,
+              username: currentUser?.username,
+            }),
+          });
+
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || `Server error (status ${res.status})`);
+          }
+
+          const data = await res.json();
+          if (data.members && Array.isArray(data.members)) {
+            data.members.forEach((m: any) => {
+              allMembers.push({
+                ...m,
+                memberIndex: allMembers.length + 1,
+              });
+            });
+          }
+        } catch (docErr: any) {
+          console.error(`Error scanning document ${i + 1}:`, docErr);
+          allMembers.push({
+            memberIndex: allMembers.length + 1,
+            docType: "nid",
+            nameBangla: "",
+            nameEnglish: "",
+            fatherNameBangla: "",
+            fatherNameEnglish: "",
+            motherNameBangla: "",
+            motherNameEnglish: "",
+            nidNumber: "",
+            dateOfBirth: "",
+            error: docErr?.message || "Failed to scan this document",
+          });
+        }
       }
 
-      const data = await res.json();
-      if (data.members && Array.isArray(data.members)) {
-        setMembers(data.members);
+      if (allMembers.length > 0) {
+        setMembers(allMembers);
         setHasScanned(true);
-        toast.success(`Successfully scanned ${data.members.length} member(s)!`, { id: toastId });
+        toast.success(`Successfully scanned ${allMembers.length} member(s)!`, { id: toastId });
       } else {
         throw new Error("No data returned from scanner.");
       }
@@ -278,13 +381,18 @@ export default function ScannerHomePage() {
             {/* 1. SCAN */}
             <button
               onClick={handleScan}
-              disabled={isScanning || selectedImages.length === 0 || !systemConfig.scanningEnabled}
+              disabled={isScanning || isProcessingFiles || selectedImages.length === 0 || !systemConfig.scanningEnabled}
               className="py-3 px-5 rounded-2xl font-bold text-sm text-white bg-brand-800 hover:bg-brand-900 shadow-md shadow-brand-900/10 transition-all flex items-center justify-center gap-2 disabled:opacity-40"
             >
               {isScanning ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
                   Scanning...
+                </>
+              ) : isProcessingFiles ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Optimizing...
                 </>
               ) : (
                 <>
@@ -297,8 +405,8 @@ export default function ScannerHomePage() {
             {/* 2. ADD ANOTHER */}
             <button
               onClick={handleAddAnother}
-              disabled={isScanning}
-              className="py-3 px-5 rounded-2xl font-bold text-sm text-brand-900 bg-brand-50 hover:bg-brand-100 border border-brand-200 transition-all flex items-center justify-center gap-2"
+              disabled={isScanning || isProcessingFiles}
+              className="py-3 px-5 rounded-2xl font-bold text-sm text-brand-900 bg-brand-50 hover:bg-brand-100 border border-brand-200 transition-all flex items-center justify-center gap-2 disabled:opacity-40"
             >
               <Plus className="w-4 h-4 text-brand-700" />
               Add Another (আরেকটি যোগ করুন)
@@ -307,7 +415,7 @@ export default function ScannerHomePage() {
             {/* 3. RETAKE */}
             <button
               onClick={handleRetake}
-              disabled={isScanning || selectedImages.length === 0}
+              disabled={isScanning || isProcessingFiles || selectedImages.length === 0}
               className="py-3 px-5 rounded-2xl font-bold text-sm text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all flex items-center justify-center gap-2 disabled:opacity-40"
             >
               <RotateCcw className="w-4 h-4" />
@@ -328,15 +436,22 @@ export default function ScannerHomePage() {
               {/* Add Another Member */}
               <button
                 onClick={handleAddAnother}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-brand-50 text-brand-800 border border-brand-200 hover:bg-brand-100 transition-colors"
+                disabled={isScanning || isProcessingFiles}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-brand-50 text-brand-800 border border-brand-200 hover:bg-brand-100 transition-colors disabled:opacity-40"
               >
-                <Plus className="w-3.5 h-3.5" /> Add Another
+                {isScanning || isProcessingFiles ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Plus className="w-3.5 h-3.5" />
+                )}
+                Add Another
               </button>
 
               {/* Retake / Reset */}
               <button
                 onClick={handleRetake}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors"
+                disabled={isScanning || isProcessingFiles}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors disabled:opacity-40"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> Retake / Reset
               </button>
@@ -373,6 +488,14 @@ export default function ScannerHomePage() {
                   <Copy className="w-3.5 h-3.5" /> Copy All (সব কপি করুন)
                 </button>
               </div>
+
+              {m.error && (
+                <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 font-medium">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                  <span>{m.error}</span>
+                </div>
+              )}
+
 
               {/* 8 Information Fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
