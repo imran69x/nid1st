@@ -36,6 +36,7 @@ export default function ScannerHomePage() {
   const [selectedImages, setSelectedImages] = useState<ImageItem[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const [scanningProgress, setScanningProgress] = useState<{ current: number; total: number } | null>(null);
   const [members, setMembers] = useState<ExtractedMember[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
 
@@ -82,13 +83,20 @@ export default function ScannerHomePage() {
       }
 
       if (hasScanned) {
-        // If user is already on results screen and clicks "Add Another", automatically scan newly added card(s) and append
+        // If user is already on results screen and clicks "Add Another", automatically scan newly added card(s) and append progressively
         setIsScanning(true);
-        const newMembers: ExtractedMember[] = [];
         const totalNew = compressedList.length;
 
         for (let i = 0; i < totalNew; i++) {
-          toast.loading(`Scanning new document ${i + 1} of ${totalNew}...`, { id: toastId });
+          if (i > 0) {
+            await new Promise((r) => setTimeout(r, 800));
+          }
+          setScanningProgress((prev) => {
+            const curr = (prev?.current || members.length) + 1;
+            const tot = (prev?.total || members.length) + totalNew;
+            return { current: curr, total: tot };
+          });
+          toast.loading(`Scanning document ${members.length + i + 1}...`, { id: toastId });
 
           try {
             const res = await fetch("/api/ocr", {
@@ -109,32 +117,37 @@ export default function ScannerHomePage() {
             const data = await res.json();
             if (data.members && Array.isArray(data.members)) {
               data.members.forEach((m: any) => {
-                newMembers.push({
-                  ...m,
-                  memberIndex: members.length + newMembers.length + 1,
-                });
+                setMembers((prev) => [
+                  ...prev,
+                  {
+                    ...m,
+                    memberIndex: prev.length + 1,
+                  },
+                ]);
               });
             }
           } catch (docErr: any) {
-            newMembers.push({
-              memberIndex: members.length + newMembers.length + 1,
-              docType: "nid",
-              nameBangla: "",
-              nameEnglish: "",
-              fatherNameBangla: "",
-              fatherNameEnglish: "",
-              motherNameBangla: "",
-              motherNameEnglish: "",
-              nidNumber: "",
-              dateOfBirth: "",
-              error: docErr?.message || "Failed to scan document",
-            });
+            setMembers((prev) => [
+              ...prev,
+              {
+                memberIndex: prev.length + 1,
+                docType: "nid",
+                nameBangla: "",
+                nameEnglish: "",
+                fatherNameBangla: "",
+                fatherNameEnglish: "",
+                motherNameBangla: "",
+                motherNameEnglish: "",
+                nidNumber: "",
+                dateOfBirth: "",
+                error: docErr?.message || "Failed to scan document",
+              },
+            ]);
           }
         }
 
         setSelectedImages((prev) => [...prev, ...compressedList]);
-        setMembers((prev) => [...prev, ...newMembers]);
-        toast.success(`Successfully added ${newMembers.length} member(s)!`, { id: toastId });
+        toast.success(`Successfully added ${totalNew} member(s)!`, { id: toastId });
       } else {
         setSelectedImages((prev) => [...prev, ...compressedList]);
         toast.success(`${compressedList.length} document(s) ready to scan!`, { id: toastId });
@@ -145,10 +158,11 @@ export default function ScannerHomePage() {
     } finally {
       setIsProcessingFiles(false);
       setIsScanning(false);
+      setScanningProgress(null);
     }
   };
 
-  // 1. SCAN ACTION (Processed document-by-document to prevent Vercel 4.5MB 413 Payload limit and timeouts)
+  // 1. SCAN ACTION (Progressive rendering: 1st card displays immediately upon scan, rest appear sequentially below!)
   const handleScan = async () => {
     if (!systemConfig.scanningEnabled) {
       toast.error("Scanning feature is currently disabled by Admin.");
@@ -160,15 +174,22 @@ export default function ScannerHomePage() {
       return;
     }
 
+    const total = selectedImages.length;
+    setMembers([]);
+    setHasScanned(true); // Switch to display mode immediately so 1st card pops up as soon as it's scanned!
     setIsScanning(true);
-    const toastId = toast.loading(`Scanning ${selectedImages.length} document(s)...`);
+    setScanningProgress({ current: 1, total });
+    const toastId = toast.loading(`Scanning document 1 of ${total}...`);
 
     try {
-      const allMembers: ExtractedMember[] = [];
-      const total = selectedImages.length;
-
       for (let i = 0; i < total; i++) {
+        setScanningProgress({ current: i + 1, total });
         toast.loading(`Scanning document ${i + 1} of ${total}...`, { id: toastId });
+
+        // Small pause between consecutive scans to respect Google Gemini API burst limits
+        if (i > 0) {
+          await new Promise((r) => setTimeout(r, 800));
+        }
 
         try {
           const res = await fetch("/api/ocr", {
@@ -189,41 +210,42 @@ export default function ScannerHomePage() {
           const data = await res.json();
           if (data.members && Array.isArray(data.members)) {
             data.members.forEach((m: any) => {
-              allMembers.push({
-                ...m,
-                memberIndex: allMembers.length + 1,
-              });
+              setMembers((prev) => [
+                ...prev,
+                {
+                  ...m,
+                  memberIndex: prev.length + 1,
+                },
+              ]);
             });
           }
         } catch (docErr: any) {
           console.error(`Error scanning document ${i + 1}:`, docErr);
-          allMembers.push({
-            memberIndex: allMembers.length + 1,
-            docType: "nid",
-            nameBangla: "",
-            nameEnglish: "",
-            fatherNameBangla: "",
-            fatherNameEnglish: "",
-            motherNameBangla: "",
-            motherNameEnglish: "",
-            nidNumber: "",
-            dateOfBirth: "",
-            error: docErr?.message || "Failed to scan this document",
-          });
+          setMembers((prev) => [
+            ...prev,
+            {
+              memberIndex: prev.length + 1,
+              docType: "nid",
+              nameBangla: "",
+              nameEnglish: "",
+              fatherNameBangla: "",
+              fatherNameEnglish: "",
+              motherNameBangla: "",
+              motherNameEnglish: "",
+              nidNumber: "",
+              dateOfBirth: "",
+              error: docErr?.message || "Failed to scan this document",
+            },
+          ]);
         }
       }
 
-      if (allMembers.length > 0) {
-        setMembers(allMembers);
-        setHasScanned(true);
-        toast.success(`Successfully scanned ${allMembers.length} member(s)!`, { id: toastId });
-      } else {
-        throw new Error("No data returned from scanner.");
-      }
+      toast.success(`Successfully scanned ${total} member(s)!`, { id: toastId });
     } catch (err: any) {
       toast.error(err.message || "Failed to scan documents", { id: toastId });
     } finally {
       setIsScanning(false);
+      setScanningProgress(null);
     }
   };
 
@@ -239,8 +261,10 @@ export default function ScannerHomePage() {
     setSelectedImages([]);
     setMembers([]);
     setHasScanned(false);
+    setScanningProgress(null);
     toast.success("Ready for new scan");
   };
+
 
   // Copy single field
   const copyField = (val: string, keyId: string) => {
@@ -428,8 +452,14 @@ export default function ScannerHomePage() {
         <div className="space-y-8">
           {/* Top Control Bar with 3 Core Actions */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-            <div className="text-sm font-bold text-slate-800">
-              Scanned Members: <span className="text-brand-800">{members.length}</span>
+            <div className="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <span>Scanned Members: <span className="text-brand-800">{members.length}</span></span>
+              {isScanning && scanningProgress && (
+                <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-brand-50 text-brand-700 border border-brand-200 animate-pulse flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  প্রসেসিং: {scanningProgress.current} / {scanningProgress.total}
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -577,8 +607,31 @@ export default function ScannerHomePage() {
               </div>
             </div>
           ))}
+
+          {/* Real-time Scanning Progress Indicator for Remaining Documents */}
+          {isScanning && scanningProgress && (
+            <div className="bg-gradient-to-r from-brand-50/70 via-white to-brand-50/40 rounded-3xl border-2 border-dashed border-brand-300 p-6 sm:p-8 flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-brand-800 text-white font-bold flex items-center justify-center shadow-xs">
+                  <Loader2 className="w-6 h-6 animate-spin" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                    সদস্য {scanningProgress.current} এর ডকুমেন্ট স্ক্যান করা হচ্ছে...
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    আগের সদস্যদের তথ্য উপরে দেখা যাচ্ছে। এটি শেষ হলেই নিচে স্বয়ংক্রিয়ভাবে যুক্ত হবে।
+                  </p>
+                </div>
+              </div>
+              <div className="text-xs font-bold text-brand-800 bg-brand-100/80 px-4 py-2 rounded-xl border border-brand-200">
+                {scanningProgress.current} / {scanningProgress.total}
+              </div>
+            </div>
+          )}
         </div>
       )}
+
     </div>
   );
 }

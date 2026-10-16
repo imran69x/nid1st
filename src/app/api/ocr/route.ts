@@ -58,32 +58,47 @@ Rules:
 4. Return ONLY valid JSON.
 `;
 
-      const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-2.5-flash"];
+      // Active working Gemini models verified for this API key
+      const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-lite-latest"];
       let parsed = null;
       let lastError: any = null;
 
       for (const mName of candidateModels) {
-        try {
-          const model = genAI.getGenerativeModel({ model: mName });
-          const response = await model.generateContent([
-            {
-              inlineData: {
-                data: base64Data,
-                mimeType: mimeType || "image/jpeg",
+        // Try up to 2 attempts per model to gracefully handle temporary 429 rate limits or 503 spikes
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const model = genAI.getGenerativeModel({ model: mName });
+            const response = await model.generateContent([
+              {
+                inlineData: {
+                  data: base64Data,
+                  mimeType: mimeType || "image/jpeg",
+                },
               },
-            },
-            prompt,
-          ]);
+              prompt,
+            ]);
 
-          const rawText = response.response.text().trim();
-          const cleanedJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-          parsed = JSON.parse(cleanedJson);
-          break; // successfully parsed
-        } catch (mErr: any) {
-          lastError = mErr;
-          console.warn(`Model ${mName} failed, trying next fallback:`, mErr?.message || mErr);
+            const rawText = response.response.text().trim();
+            const cleanedJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+            parsed = JSON.parse(cleanedJson);
+            break; // successfully parsed
+          } catch (mErr: any) {
+            lastError = mErr;
+            const errMsg = mErr?.message || "";
+            const isRetryable = errMsg.includes("429") || errMsg.includes("503") || errMsg.includes("RESOURCE_EXHAUSTED");
+
+            if (isRetryable && attempt < 2) {
+              console.warn(`Model ${mName} temporarily busy (attempt ${attempt}), waiting 1.5s...`);
+              await new Promise((r) => setTimeout(r, 1500));
+            } else {
+              console.warn(`Model ${mName} failed:`, errMsg);
+              break; // try next candidate model
+            }
+          }
         }
+        if (parsed) break;
       }
+
 
       if (parsed) {
         // Normalize DOB to DD-MM-YYYY format just in case
