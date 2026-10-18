@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect } from "react";
 import { useUserAuth } from "@/lib/services/userAuthContext";
@@ -29,7 +29,7 @@ import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 
 export default function AdminPage() {
-  const { currentUser, isAdmin, isLoading, systemConfig, refreshConfig } = useUserAuth();
+  const { currentUser, isAdmin, isLoading, systemConfig, refreshConfig, updateUserLocalState } = useUserAuth();
   const router = useRouter();
 
   const [users, setUsers] = useState<DatabaseUser[]>([]);
@@ -176,7 +176,10 @@ export default function AdminPage() {
 
     setUpdatingMyPassword(true);
     try {
-      await changeUserPassword(currentUser?.id || currentUser?.username || "", myNewPassword.trim());
+      const updatedUser = await changeUserPassword(currentUser?.id || currentUser?.username || "", myNewPassword.trim());
+      if (updatedUser?.passwordUpdatedAt) {
+        updateUserLocalState({ passwordUpdatedAt: updatedUser.passwordUpdatedAt });
+      }
       toast.success("অ্যাডমিনের পাসওয়ার্ড সফলভাবে পরিবর্তিত হয়েছে!");
       setMyNewPassword("");
       await loadUsers();

@@ -29,7 +29,7 @@ interface ImageItem {
 }
 
 export default function ScannerHomePage() {
-  const { currentUser, isLoading, systemConfig } = useUserAuth();
+  const { currentUser, isLoading, systemConfig, isBlocked, setShowLockedModal } = useUserAuth();
   const router = useRouter();
 
   // Selected images to scan
@@ -39,6 +39,16 @@ export default function ScannerHomePage() {
   const [scanningProgress, setScanningProgress] = useState<{ current: number; total: number } | null>(null);
   const [members, setMembers] = useState<ExtractedMember[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
+
+  // Guard against locked/blocked user
+  const checkBlocked = () => {
+    if (isBlocked || currentUser?.isBlocked) {
+      setShowLockedModal(true);
+      toast.error("Your account is locked. Please contact developer.");
+      return true;
+    }
+    return false;
+  };
 
   // Redirect to login if user not logged in
   useEffect(() => {
@@ -56,6 +66,10 @@ export default function ScannerHomePage() {
 
   // Handle image files selection with automatic compression (reduces 5-10MB camera files to ~180KB)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (checkBlocked()) {
+      e.target.value = "";
+      return;
+    }
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -164,6 +178,8 @@ export default function ScannerHomePage() {
 
   // 1. SCAN ACTION (Progressive rendering: 1st card displays immediately upon scan, rest appear sequentially below!)
   const handleScan = async () => {
+    if (checkBlocked()) return;
+
     if (!systemConfig.scanningEnabled) {
       toast.error("Scanning feature is currently disabled by Admin.");
       return;
@@ -251,6 +267,7 @@ export default function ScannerHomePage() {
 
   // 2. ADD ANOTHER ACTION
   const handleAddAnother = () => {
+    if (checkBlocked()) return;
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
@@ -258,6 +275,7 @@ export default function ScannerHomePage() {
 
   // 3. RETAKE / RESET ACTION
   const handleRetake = () => {
+    if (checkBlocked()) return;
     setSelectedImages([]);
     setMembers([]);
     setHasScanned(false);
@@ -265,9 +283,9 @@ export default function ScannerHomePage() {
     toast.success("Ready for new scan");
   };
 
-
   // Copy single field
   const copyField = (val: string, keyId: string) => {
+    if (checkBlocked()) return;
     if (!val) {
       toast.error("Field is empty");
       return;
@@ -282,6 +300,7 @@ export default function ScannerHomePage() {
 
   // Copy all fields for a member
   const copyAllMemberFields = (m: ExtractedMember, idx: number) => {
+    if (checkBlocked()) return;
     const text = [
       `সদস্য ${idx + 1} (${m.docType === "birth_certificate" ? "জন্ম নিবন্ধন" : "NID"})`,
       `নাম (বাংলা): ${m.nameBangla || ""}`,
@@ -338,7 +357,10 @@ export default function ScannerHomePage() {
         <div className="space-y-6">
           {/* Document Upload Area */}
           <div
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (checkBlocked()) return;
+              fileInputRef.current?.click();
+            }}
             className="border-2 border-dashed border-slate-300 hover:border-brand-600 rounded-3xl p-8 sm:p-12 text-center bg-white hover:bg-brand-50/20 transition-all cursor-pointer shadow-soft group"
           >
             <div className="w-16 h-16 mx-auto rounded-2xl bg-brand-50 group-hover:bg-brand-100 flex items-center justify-center text-brand-700 transition-colors mb-4">
@@ -358,7 +380,10 @@ export default function ScannerHomePage() {
           {/* Camera Capture shortcut */}
           <div className="flex justify-center">
             <button
-              onClick={() => cameraInputRef.current?.click()}
+              onClick={() => {
+                if (checkBlocked()) return;
+                cameraInputRef.current?.click();
+              }}
               className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors shadow-xs"
             >
               <Camera className="w-4 h-4 text-brand-700" />

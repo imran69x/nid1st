@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { incrementUserScanCount } from "@/lib/server/store";
+import { incrementUserScanCount, findUserById, findUserByUsername } from "@/lib/server/store";
 
 export const maxDuration = 60; // 60 seconds max timeout for Vercel/Next.js
 
@@ -10,6 +10,20 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { image, images, mimeType = "image/jpeg", userId, username } = body;
+
+    // Check if user is locked/blocked
+    if (userId || username) {
+      let targetUser = userId ? await findUserById(userId) : null;
+      if (!targetUser && username) {
+        targetUser = await findUserByUsername(username);
+      }
+      if (targetUser && targetUser.isBlocked) {
+        return NextResponse.json(
+          { error: "Your account is locked. Please contact developer." },
+          { status: 403 }
+        );
+      }
+    }
 
     const imageList: string[] = images && Array.isArray(images) ? images : image ? [image] : [];
 

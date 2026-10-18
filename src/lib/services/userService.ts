@@ -108,7 +108,7 @@ export async function toggleUserBlockStatus(userId: string, isBlocked: boolean):
 /**
  * Change password for any user or admin
  */
-export async function changeUserPassword(userId: string, newPassword: string): Promise<void> {
+export async function changeUserPassword(userId: string, newPassword: string): Promise<any> {
   const res = await fetch("/api/admin/users", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -119,6 +119,7 @@ export async function changeUserPassword(userId: string, newPassword: string): P
   if (!res.ok) {
     throw new Error(data.error || "Failed to change password");
   }
+  return data.user;
 }
 
 /**

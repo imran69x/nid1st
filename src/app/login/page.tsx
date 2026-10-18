@@ -55,10 +55,37 @@ export default function LoginPage() {
         {isBlockedError ? (
           <div className="mb-6 p-4 rounded-2xl bg-rose-50 border border-rose-200 flex items-start gap-3">
             <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-            <div className="text-xs">
-              <div className="font-bold text-rose-900">Access Denied / Blocked</div>
-              <div className="text-rose-700 mt-0.5">
-                You are locked/blocked. Please contact our support team.
+            <div className="text-xs space-y-2 flex-1">
+              <div>
+                <div className="font-bold text-rose-900 text-sm">Account Locked (একাউন্ট লক)</div>
+                <div className="text-rose-700 font-medium mt-0.5">
+                  Your account is locked. Please contact developer.
+                </div>
+                <div className="text-[11px] text-rose-600 font-bengali mt-0.5">
+                  আপনার একাউন্টটি লক করা হয়েছে। অনুগ্রহ করে ডেভেলপারের সাথে যোগাযোগ করুন।
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-rose-200/80 flex items-center justify-between">
+                <div>
+                  <span className="text-slate-600">Developer: </span>
+                  <a
+                    href="https://wa.me/8801706338181"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold text-emerald-700 hover:text-emerald-800 hover:underline transition-colors"
+                  >
+                    MD IMRAN HOSSAIN NOYON
+                  </a>
+                </div>
+                <a
+                  href="https://wa.me/8801706338181"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition-colors"
+                >
+                  WhatsApp
+                </a>
               </div>
             </div>
           </div>
@@ -119,10 +146,22 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-6 pt-5 border-t border-slate-100 text-center">
+        <div className="mt-6 pt-5 border-t border-slate-100 text-center space-y-2">
           <p className="text-[11px] text-slate-400">
             Authorized Personnel Only • Secure Access
           </p>
+          <div className="text-xs text-slate-500 font-medium">
+            <span>Developer: </span>
+            <a
+              href="https://wa.me/8801706338181"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-bold text-emerald-700 hover:text-emerald-800 hover:underline transition-colors ml-1"
+              title="WhatsApp: 01706338181"
+            >
+              MD IMRAN HOSSAIN NOYON
+            </a>
+          </div>
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@ export interface DatabaseUser {
   isAdmin: boolean;
   isBlocked: boolean;
   createdAt: number;
+  passwordUpdatedAt?: number;
   scanCount: number;
 }
 

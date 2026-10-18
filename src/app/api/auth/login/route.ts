@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
     if (user.isBlocked) {
       return NextResponse.json(
-        { error: "You are locked/blocked. Please contact our support." },
+        { error: "Your account is locked. Please contact developer." },
         { status: 403 }
       );
     }
@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
         isAdmin: Boolean(user.isAdmin),
         isBlocked: false,
         createdAt: user.createdAt,
+        passwordUpdatedAt: user.passwordUpdatedAt || user.createdAt || 0,
         scanCount: user.scanCount || 0,
       },
     });

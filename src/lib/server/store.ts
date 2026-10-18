@@ -73,6 +73,7 @@ export async function ensureDefaultAdmin(): Promise<void> {
       isAdmin: true,
       isBlocked: false,
       createdAt: Date.now(),
+      passwordUpdatedAt: Date.now(),
       scanCount: 0,
     };
     await setDoc(adminDocRef, adminUser);
@@ -84,6 +85,7 @@ export async function ensureDefaultAdmin(): Promise<void> {
     if (!data.isAdmin) updates.isAdmin = true;
     if (data.isBlocked) updates.isBlocked = false;
     if (!data.password && password) updates.password = password;
+    if (!data.passwordUpdatedAt) updates.passwordUpdatedAt = data.createdAt || Date.now();
     if (Object.keys(updates).length > 0) {
       await updateDoc(adminDocRef, updates);
     }
@@ -109,6 +111,7 @@ export async function readUsers(): Promise<DatabaseUser[]> {
       isAdmin: Boolean(data.isAdmin),
       isBlocked: Boolean(data.isBlocked),
       createdAt: data.createdAt || Date.now(),
+      passwordUpdatedAt: data.passwordUpdatedAt || data.createdAt || 0,
       scanCount: typeof data.scanCount === "number" ? data.scanCount : 0,
     });
   });
@@ -129,6 +132,7 @@ export async function writeUser(user: DatabaseUser): Promise<void> {
     isAdmin: Boolean(user.isAdmin),
     isBlocked: Boolean(user.isBlocked),
     createdAt: user.createdAt || Date.now(),
+    passwordUpdatedAt: user.passwordUpdatedAt || user.createdAt || Date.now(),
     scanCount: typeof user.scanCount === "number" ? user.scanCount : 0,
   });
 }
@@ -168,6 +172,7 @@ export async function findUserById(userId: string): Promise<DatabaseUser | null>
     isAdmin: Boolean(data.isAdmin),
     isBlocked: Boolean(data.isBlocked),
     createdAt: data.createdAt || Date.now(),
+    passwordUpdatedAt: data.passwordUpdatedAt || data.createdAt || 0,
     scanCount: typeof data.scanCount === "number" ? data.scanCount : 0,
   };
 }

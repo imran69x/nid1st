@@ -54,6 +54,7 @@ export async function POST(req: NextRequest) {
       isAdmin: Boolean(isAdmin),
       isBlocked: false,
       createdAt: Date.now(),
+      passwordUpdatedAt: Date.now(),
       scanCount: 0,
     };
 
@@ -101,6 +102,7 @@ export async function PUT(req: NextRequest) {
     }
 
     targetUser.password = cleanPassword;
+    targetUser.passwordUpdatedAt = Date.now();
     await writeUser(targetUser);
 
     return NextResponse.json({
@@ -110,6 +112,7 @@ export async function PUT(req: NextRequest) {
         id: targetUser.id,
         username: targetUser.username,
         isAdmin: targetUser.isAdmin,
+        passwordUpdatedAt: targetUser.passwordUpdatedAt,
       },
     });
   } catch (err: any) {
