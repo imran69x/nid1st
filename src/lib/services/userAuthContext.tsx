@@ -129,21 +129,32 @@ export function UserAuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        // If block/lock status has changed
-        const serverBlocked = Boolean(data.isBlocked);
-        if (serverBlocked !== Boolean(currentUser.isBlocked)) {
-          const updated: DatabaseUser = {
-            ...currentUser,
-            isBlocked: serverBlocked,
-            passwordUpdatedAt: data.user?.passwordUpdatedAt || currentUser.passwordUpdatedAt,
-          };
-          setCurrentUser(updated);
-          saveSession(updated);
+        // Sync real-time profile picture, name, block status, and permissions
+        if (data.user) {
+          const serverBlocked = Boolean(data.isBlocked);
+          const picDiff = data.user.profilePic !== undefined && data.user.profilePic !== currentUser.profilePic;
+          const nameDiff = data.user.name !== undefined && data.user.name !== currentUser.name;
+          const blockDiff = serverBlocked !== Boolean(currentUser.isBlocked);
+          const permDiff = Boolean(data.user.canDeleteRecent) !== Boolean(currentUser.canDeleteRecent);
 
-          if (serverBlocked) {
-            setShowLockedModal(true);
-          } else {
-            setShowLockedModal(false);
+          if (picDiff || nameDiff || blockDiff || permDiff) {
+            const updated: DatabaseUser = {
+              ...currentUser,
+              name: data.user.name || currentUser.name,
+              profilePic: data.user.profilePic !== undefined ? data.user.profilePic : currentUser.profilePic,
+              profilePicChangedByUser: Boolean(data.user.profilePicChangedByUser),
+              canDeleteRecent: Boolean(data.user.canDeleteRecent),
+              isBlocked: serverBlocked,
+              passwordUpdatedAt: data.user?.passwordUpdatedAt || currentUser.passwordUpdatedAt,
+            };
+            setCurrentUser(updated);
+            saveSession(updated);
+
+            if (serverBlocked) {
+              setShowLockedModal(true);
+            } else {
+              setShowLockedModal(false);
+            }
           }
         }
       } catch (err) {
@@ -172,6 +183,9 @@ export function UserAuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (username: string, pass: string): Promise<DatabaseUser> => {
     const user = await loginWithDatabase(username, pass);
     setCurrentUser(user);
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("nid_fresh_login_" + (user.id || user.username), "true");
+    }
     if (user.isBlocked) {
       setShowLockedModal(true);
     } else {

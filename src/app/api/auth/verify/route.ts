@@ -65,6 +65,7 @@ export async function GET(req: NextRequest) {
           user: {
             id: user.id,
             username: user.username,
+            name: user.name || user.username,
             isAdmin: Boolean(user.isAdmin),
             isBlocked: true,
             passwordUpdatedAt: serverPwTime,
@@ -83,9 +84,13 @@ export async function GET(req: NextRequest) {
         user: {
           id: user.id,
           username: user.username,
+          name: user.name || user.username,
           isAdmin: Boolean(user.isAdmin),
           isBlocked: false,
           passwordUpdatedAt: serverPwTime,
+          canDeleteRecent: Boolean(user.canDeleteRecent),
+          profilePic: user.profilePic || "",
+          profilePicChangedByUser: Boolean(user.profilePicChangedByUser),
         },
       },
       {

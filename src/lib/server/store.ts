@@ -17,7 +17,7 @@ import {
   where,
   Firestore,
 } from "firebase/firestore";
-import { DatabaseUser, SystemConfig } from "@/types/user";
+import { DatabaseUser, SystemConfig, RecentScanRecord } from "@/types/user";
 
 // ---- Firebase initialization for server-side API routes ----
 const firebaseConfig = {
@@ -45,6 +45,7 @@ function getAdminCredentials() {
 const USERS_COLLECTION = "users";
 const CONFIG_COLLECTION = "system";
 const CONFIG_DOC_ID = "config";
+const RECENT_SCANS_COLLECTION = "recent_scans";
 
 // ============================================================
 // USER OPERATIONS
@@ -69,6 +70,7 @@ export async function ensureDefaultAdmin(): Promise<void> {
     const adminUser: DatabaseUser = {
       id: "admin_" + username,
       username: username,
+      name: "Admin",
       password: password,
       isAdmin: true,
       isBlocked: false,
@@ -84,6 +86,7 @@ export async function ensureDefaultAdmin(): Promise<void> {
     const updates: Partial<DatabaseUser> = {};
     if (!data.isAdmin) updates.isAdmin = true;
     if (data.isBlocked) updates.isBlocked = false;
+    if (!data.name) updates.name = "Admin";
     if (!data.password && password) updates.password = password;
     if (!data.passwordUpdatedAt) updates.passwordUpdatedAt = data.createdAt || Date.now();
     if (Object.keys(updates).length > 0) {
@@ -107,12 +110,16 @@ export async function readUsers(): Promise<DatabaseUser[]> {
     users.push({
       id: docSnap.id,
       username: data.username || "",
+      name: data.name || "",
       password: data.password || "",
       isAdmin: Boolean(data.isAdmin),
       isBlocked: Boolean(data.isBlocked),
       createdAt: data.createdAt || Date.now(),
       passwordUpdatedAt: data.passwordUpdatedAt || data.createdAt || 0,
       scanCount: typeof data.scanCount === "number" ? data.scanCount : 0,
+      canDeleteRecent: Boolean(data.canDeleteRecent),
+      profilePic: data.profilePic || "",
+      profilePicChangedByUser: Boolean(data.profilePicChangedByUser),
     });
   });
 
@@ -128,12 +135,16 @@ export async function writeUser(user: DatabaseUser): Promise<void> {
   await setDoc(userDocRef, {
     id: user.id,
     username: user.username,
+    name: user.name || "",
     password: user.password || "",
     isAdmin: Boolean(user.isAdmin),
     isBlocked: Boolean(user.isBlocked),
     createdAt: user.createdAt || Date.now(),
     passwordUpdatedAt: user.passwordUpdatedAt || user.createdAt || Date.now(),
     scanCount: typeof user.scanCount === "number" ? user.scanCount : 0,
+    canDeleteRecent: Boolean(user.canDeleteRecent),
+    profilePic: user.profilePic || "",
+    profilePicChangedByUser: Boolean(user.profilePicChangedByUser),
   });
 }
 
@@ -168,12 +179,16 @@ export async function findUserById(userId: string): Promise<DatabaseUser | null>
   return {
     id: snap.id,
     username: data.username || "",
+    name: data.name || "",
     password: data.password || "",
     isAdmin: Boolean(data.isAdmin),
     isBlocked: Boolean(data.isBlocked),
     createdAt: data.createdAt || Date.now(),
     passwordUpdatedAt: data.passwordUpdatedAt || data.createdAt || 0,
     scanCount: typeof data.scanCount === "number" ? data.scanCount : 0,
+    canDeleteRecent: Boolean(data.canDeleteRecent),
+    profilePic: data.profilePic || "",
+    profilePicChangedByUser: Boolean(data.profilePicChangedByUser),
   };
 }
 
@@ -209,6 +224,8 @@ export async function readSystemConfig(): Promise<SystemConfig> {
       return {
         scanningEnabled: data.scanningEnabled !== false,
         noticeMessage: data.noticeMessage || "System operational.",
+        allowUserDeleteRecent: Boolean(data.allowUserDeleteRecent),
+        hideRecentScans: Boolean(data.hideRecentScans),
       };
     }
   } catch (err) {
@@ -219,6 +236,8 @@ export async function readSystemConfig(): Promise<SystemConfig> {
   const defaultConfig: SystemConfig = {
     scanningEnabled: true,
     noticeMessage: "System operational.",
+    allowUserDeleteRecent: false,
+    hideRecentScans: false,
   };
 
   // Seed default config
@@ -240,6 +259,8 @@ export async function writeSystemConfig(config: SystemConfig): Promise<void> {
   await setDoc(configRef, {
     scanningEnabled: config.scanningEnabled,
     noticeMessage: config.noticeMessage || "",
+    allowUserDeleteRecent: Boolean(config.allowUserDeleteRecent),
+    hideRecentScans: Boolean(config.hideRecentScans),
   });
 }
 
@@ -249,3 +270,87 @@ export async function writeSystemConfig(config: SystemConfig): Promise<void> {
 export function getAdminUsername(): string {
   return getAdminCredentials().username;
 }
+
+// ============================================================
+// RECENT SCANS OPERATIONS
+// ============================================================
+
+/**
+ * Save a recent scan record in Firestore
+ */
+export async function saveRecentScan(record: RecentScanRecord): Promise<void> {
+  const db = getServerDb();
+  const scanDocRef = doc(db, RECENT_SCANS_COLLECTION, record.id);
+  await setDoc(scanDocRef, {
+    id: record.id,
+    title: record.title || "NID Scan",
+    userId: record.userId || "",
+    username: record.username || "",
+    userDisplayName: record.userDisplayName || "",
+    createdAt: record.createdAt || Date.now(),
+    totalMembers: record.totalMembers || (record.members ? record.members.length : 1),
+    members: record.members || [],
+  });
+}
+
+/**
+ * Read recent scans from Firestore, sorted by newest first
+ */
+export async function readRecentScans(limitCount = 100): Promise<RecentScanRecord[]> {
+  const db = getServerDb();
+  const snapshot = await getDocs(collection(db, RECENT_SCANS_COLLECTION));
+  const records: RecentScanRecord[] = [];
+
+  snapshot.forEach((docSnap) => {
+    const data = docSnap.data();
+    records.push({
+      id: docSnap.id,
+      title: data.title || "NID Scan",
+      userId: data.userId || "",
+      username: data.username || "",
+      userDisplayName: data.userDisplayName || "",
+      createdAt: data.createdAt || 0,
+      totalMembers: data.totalMembers || (data.members ? data.members.length : 1),
+      members: data.members || [],
+    });
+  });
+
+  // Sort descending by creation date
+  records.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  if (limitCount > 0 && records.length > limitCount) {
+    return records.slice(0, limitCount);
+  }
+
+  return records;
+}
+
+/**
+ * Delete a single recent scan record
+ */
+export async function deleteRecentScan(id: string): Promise<void> {
+  const db = getServerDb();
+  await deleteDoc(doc(db, RECENT_SCANS_COLLECTION, id));
+}
+
+/**
+ * Delete all recent scan records for a specific user
+ */
+export async function deleteRecentScansForUser(userIdOrUsername: string): Promise<number> {
+  const db = getServerDb();
+  const allScans = await readRecentScans(0);
+  const userScans = allScans.filter(
+    (s) =>
+      (s.userId && s.userId === userIdOrUsername) ||
+      (s.username && s.username.toLowerCase() === userIdOrUsername.toLowerCase())
+  );
+
+  let deletedCount = 0;
+  for (const scan of userScans) {
+    await deleteDoc(doc(db, RECENT_SCANS_COLLECTION, scan.id));
+    deletedCount++;
+  }
+
+  return deletedCount;
+}
+

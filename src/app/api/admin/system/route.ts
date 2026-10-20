@@ -22,6 +22,12 @@ export async function POST(req: NextRequest) {
     if (typeof body.scanningEnabled === "boolean") {
       config.scanningEnabled = body.scanningEnabled;
     }
+    if (typeof body.allowUserDeleteRecent === "boolean") {
+      config.allowUserDeleteRecent = body.allowUserDeleteRecent;
+    }
+    if (typeof body.hideRecentScans === "boolean") {
+      config.hideRecentScans = body.hideRecentScans;
+    }
     if (body.noticeMessage !== undefined) {
       config.noticeMessage = body.noticeMessage;
     }

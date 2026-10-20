@@ -15,10 +15,12 @@ import {
   AlertTriangle,
   Loader2,
   Trash2,
+  History,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useEffect } from "react";
 import { compressImageForUpload } from "@/lib/ocr/imagePreprocess";
 
@@ -29,7 +31,7 @@ interface ImageItem {
 }
 
 export default function ScannerHomePage() {
-  const { currentUser, isLoading, systemConfig, isBlocked, setShowLockedModal } = useUserAuth();
+  const { currentUser, isLoading, systemConfig, isBlocked, setShowLockedModal, isAdmin } = useUserAuth();
   const router = useRouter();
 
   // Selected images to scan
@@ -39,6 +41,7 @@ export default function ScannerHomePage() {
   const [scanningProgress, setScanningProgress] = useState<{ current: number; total: number } | null>(null);
   const [members, setMembers] = useState<ExtractedMember[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
+  const [currentScanId, setCurrentScanId] = useState<string | null>(null);
 
   // Guard against locked/blocked user
   const checkBlocked = () => {
@@ -100,6 +103,8 @@ export default function ScannerHomePage() {
         // If user is already on results screen and clicks "Add Another", automatically scan newly added card(s) and append progressively
         setIsScanning(true);
         const totalNew = compressedList.length;
+        let hasIncrementedNew = false;
+        const newAddedMembers: ExtractedMember[] = [];
 
         for (let i = 0; i < totalNew; i++) {
           if (i > 0) {
@@ -112,6 +117,8 @@ export default function ScannerHomePage() {
           });
           toast.loading(`Scanning document ${members.length + i + 1}...`, { id: toastId });
 
+          const shouldIncrement = !hasIncrementedNew;
+
           try {
             const res = await fetch("/api/ocr", {
               method: "POST",
@@ -120,6 +127,7 @@ export default function ScannerHomePage() {
                 image: compressedList[i].dataUrl,
                 userId: currentUser?.id,
                 username: currentUser?.username,
+                shouldIncrement: shouldIncrement,
               }),
             });
 
@@ -128,40 +136,63 @@ export default function ScannerHomePage() {
               throw new Error(errData.error || `Scan failed with status ${res.status}`);
             }
 
+            hasIncrementedNew = true;
+
             const data = await res.json();
             if (data.members && Array.isArray(data.members)) {
               data.members.forEach((m: any) => {
-                setMembers((prev) => [
-                  ...prev,
-                  {
-                    ...m,
-                    memberIndex: prev.length + 1,
-                  },
-                ]);
+                const added: ExtractedMember = {
+                  ...m,
+                  memberIndex: members.length + newAddedMembers.length + 1,
+                };
+                newAddedMembers.push(added);
+                setMembers((prev) => [...prev, added]);
               });
             }
           } catch (docErr: any) {
-            setMembers((prev) => [
-              ...prev,
-              {
-                memberIndex: prev.length + 1,
-                docType: "nid",
-                nameBangla: "",
-                nameEnglish: "",
-                fatherNameBangla: "",
-                fatherNameEnglish: "",
-                motherNameBangla: "",
-                motherNameEnglish: "",
-                nidNumber: "",
-                dateOfBirth: "",
-                error: docErr?.message || "Failed to scan document",
-              },
-            ]);
+            const errMember: ExtractedMember = {
+              memberIndex: members.length + newAddedMembers.length + 1,
+              docType: "nid",
+              nameBangla: "",
+              nameEnglish: "",
+              fatherNameBangla: "",
+              fatherNameEnglish: "",
+              motherNameBangla: "",
+              motherNameEnglish: "",
+              nidNumber: "",
+              dateOfBirth: "",
+              error: docErr?.message || "Failed to scan document",
+            };
+            newAddedMembers.push(errMember);
+            setMembers((prev) => [...prev, errMember]);
           }
         }
 
         setSelectedImages((prev) => [...prev, ...compressedList]);
         toast.success(`Successfully added ${totalNew} member(s)!`, { id: toastId });
+
+        // Update the recent scan record with all members
+        const allMembers = [...members, ...newAddedMembers];
+        if (allMembers.length > 0) {
+          const firstCard = allMembers[0];
+          const cardTitle = firstCard.nameBangla || firstCard.nameEnglish || "NID Document";
+          try {
+            await fetch("/api/recent", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                id: currentScanId || ("scan_" + Date.now()),
+                title: cardTitle,
+                members: allMembers,
+                userId: currentUser?.id,
+                username: currentUser?.username,
+                userDisplayName: currentUser?.name || currentUser?.username,
+              }),
+            });
+          } catch (saveErr) {
+            console.warn("Failed to update recent scan:", saveErr);
+          }
+        }
       } else {
         setSelectedImages((prev) => [...prev, ...compressedList]);
         toast.success(`${compressedList.length} document(s) ready to scan!`, { id: toastId });
@@ -197,6 +228,12 @@ export default function ScannerHomePage() {
     setScanningProgress({ current: 1, total });
     const toastId = toast.loading(`Scanning document 1 of ${total}...`);
 
+    const scanSessionId = "scan_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+    setCurrentScanId(scanSessionId);
+
+    const extractedSoFar: ExtractedMember[] = [];
+    let hasIncremented = false;
+
     try {
       for (let i = 0; i < total; i++) {
         setScanningProgress({ current: i + 1, total });
@@ -207,6 +244,8 @@ export default function ScannerHomePage() {
           await new Promise((r) => setTimeout(r, 800));
         }
 
+        const shouldIncrement = !hasIncremented;
+
         try {
           const res = await fetch("/api/ocr", {
             method: "POST",
@@ -215,6 +254,7 @@ export default function ScannerHomePage() {
               image: selectedImages[i].dataUrl,
               userId: currentUser?.id,
               username: currentUser?.username,
+              shouldIncrement: shouldIncrement,
             }),
           });
 
@@ -223,40 +263,62 @@ export default function ScannerHomePage() {
             throw new Error(errData.error || `Server error (status ${res.status})`);
           }
 
+          hasIncremented = true; // Counted exactly once for this entire scan button click!
+
           const data = await res.json();
           if (data.members && Array.isArray(data.members)) {
             data.members.forEach((m: any) => {
-              setMembers((prev) => [
-                ...prev,
-                {
-                  ...m,
-                  memberIndex: prev.length + 1,
-                },
-              ]);
+              const newMember: ExtractedMember = {
+                ...m,
+                memberIndex: extractedSoFar.length + 1,
+              };
+              extractedSoFar.push(newMember);
+              setMembers((prev) => [...prev, newMember]);
             });
           }
         } catch (docErr: any) {
           console.error(`Error scanning document ${i + 1}:`, docErr);
-          setMembers((prev) => [
-            ...prev,
-            {
-              memberIndex: prev.length + 1,
-              docType: "nid",
-              nameBangla: "",
-              nameEnglish: "",
-              fatherNameBangla: "",
-              fatherNameEnglish: "",
-              motherNameBangla: "",
-              motherNameEnglish: "",
-              nidNumber: "",
-              dateOfBirth: "",
-              error: docErr?.message || "Failed to scan this document",
-            },
-          ]);
+          const errMember: ExtractedMember = {
+            memberIndex: extractedSoFar.length + 1,
+            docType: "nid",
+            nameBangla: "",
+            nameEnglish: "",
+            fatherNameBangla: "",
+            fatherNameEnglish: "",
+            motherNameBangla: "",
+            motherNameEnglish: "",
+            nidNumber: "",
+            dateOfBirth: "",
+            error: docErr?.message || "Failed to scan this document",
+          };
+          extractedSoFar.push(errMember);
+          setMembers((prev) => [...prev, errMember]);
         }
       }
 
       toast.success(`Successfully scanned ${total} member(s)!`, { id: toastId });
+
+      // Automatically save to Recent Scans with the 1st card's name as title
+      if (extractedSoFar.length > 0) {
+        const firstMember = extractedSoFar[0];
+        const cardTitle = firstMember.nameBangla || firstMember.nameEnglish || "NID Document";
+        try {
+          await fetch("/api/recent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: scanSessionId,
+              title: cardTitle,
+              members: extractedSoFar,
+              userId: currentUser?.id,
+              username: currentUser?.username,
+              userDisplayName: currentUser?.name || currentUser?.username,
+            }),
+          });
+        } catch (saveErr) {
+          console.warn("Failed to auto-save recent scan:", saveErr);
+        }
+      }
     } catch (err: any) {
       toast.error(err.message || "Failed to scan documents", { id: toastId });
     } finally {
@@ -280,6 +342,7 @@ export default function ScannerHomePage() {
     setMembers([]);
     setHasScanned(false);
     setScanningProgress(null);
+    setCurrentScanId(null);
     toast.success("Ready for new scan");
   };
 
@@ -488,6 +551,17 @@ export default function ScannerHomePage() {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Recent Scans shortcut */}
+              {(isAdmin || !systemConfig.hideRecentScans) && (
+                <Link
+                  href="/recent"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors shadow-2xs"
+                >
+                  <History className="w-3.5 h-3.5 text-brand-700" />
+                  <span>Recent</span>
+                </Link>
+              )}
+
               {/* Add Another Member */}
               <button
                 onClick={handleAddAnother}

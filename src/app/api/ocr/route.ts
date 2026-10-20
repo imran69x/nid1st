@@ -147,9 +147,11 @@ Rules:
       }
     }
 
-    if (userId || username) {
+    // Increment scan count strictly by 1 per scan operation (not per card count)
+    const shouldIncrement = body.shouldIncrement !== undefined ? Boolean(body.shouldIncrement) : true;
+    if (shouldIncrement && (userId || username)) {
       try {
-        await incrementUserScanCount(userId || username, imageList.length);
+        await incrementUserScanCount(userId || username, 1);
       } catch (e) {
         console.warn("Failed to increment scan count:", e);
       }

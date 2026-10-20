@@ -38,11 +38,15 @@ export async function POST(req: NextRequest) {
       user: {
         id: user.id,
         username: user.username,
+        name: user.name || user.username,
         isAdmin: Boolean(user.isAdmin),
         isBlocked: false,
         createdAt: user.createdAt,
         passwordUpdatedAt: user.passwordUpdatedAt || user.createdAt || 0,
         scanCount: user.scanCount || 0,
+        canDeleteRecent: Boolean(user.canDeleteRecent),
+        profilePic: user.profilePic || "",
+        profilePicChangedByUser: Boolean(user.profilePicChangedByUser),
       },
     });
   } catch (err: any) {
