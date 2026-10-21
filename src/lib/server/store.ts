@@ -226,6 +226,7 @@ export async function readSystemConfig(): Promise<SystemConfig> {
         noticeMessage: data.noticeMessage || "System operational.",
         allowUserDeleteRecent: Boolean(data.allowUserDeleteRecent),
         hideRecentScans: Boolean(data.hideRecentScans),
+        showActiveUsersTicker: data.showActiveUsersTicker !== false,
       };
     }
   } catch (err) {
@@ -238,6 +239,7 @@ export async function readSystemConfig(): Promise<SystemConfig> {
     noticeMessage: "System operational.",
     allowUserDeleteRecent: false,
     hideRecentScans: false,
+    showActiveUsersTicker: true,
   };
 
   // Seed default config
@@ -261,6 +263,7 @@ export async function writeSystemConfig(config: SystemConfig): Promise<void> {
     noticeMessage: config.noticeMessage || "",
     allowUserDeleteRecent: Boolean(config.allowUserDeleteRecent),
     hideRecentScans: Boolean(config.hideRecentScans),
+    showActiveUsersTicker: config.showActiveUsersTicker !== false,
   });
 }
 

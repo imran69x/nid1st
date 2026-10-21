@@ -18,6 +18,7 @@ export interface SystemConfig {
   noticeMessage?: string;
   allowUserDeleteRecent?: boolean;
   hideRecentScans?: boolean; // When true, normal users cannot see Recent button
+  showActiveUsersTicker?: boolean; // When false, hides the active users ticker section
 }
 
 export interface ExtractedMember {

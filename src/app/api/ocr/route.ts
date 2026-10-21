@@ -1,10 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { incrementUserScanCount, findUserById, findUserByUsername } from "@/lib/server/store";
+import { sanitizeExtractedDocument } from "@/lib/ocr/nidSanitizer";
 
 export const maxDuration = 60; // 60 seconds max timeout for Vercel/Next.js
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+
+const SYSTEM_INSTRUCTION = `You are an elite optical character recognition (OCR) and document intelligence system specialized in Bangladeshi National Identity Cards (Smart Cards and Old Laminated Cards) and Bangladesh Digital Birth Registration Certificates (ডিজিটাল জন্ম নিবন্ধন সনদ).
+
+Your objective is to read every character on the document with maximum fidelity, accurately recognizing Bengali letters, conjunct consonants (যুক্তবর্ণ), diacritics, honorifics, numbers, and dates.`;
+
+const EXTRACTION_PROMPT = `
+Analyze the provided document image (Bangladeshi Smart NID, Old NID Card, or Digital Birth Registration Certificate) and extract the required fields.
+
+The image might be rotated (90°, 180°, 270°) or captured at an angle. Auto-detect its orientation and extract all text in its natural orientation.
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "docType": "nid" or "birth_certificate",
+  "nameBangla": "Exact full name in Bengali without any label prefix like 'নাম:' or 'নামঃ'",
+  "nameEnglish": "Full name in English in ALL CAPS. If English name is not written, transliterate the Bengali name accurately into standard Bangladeshi English.",
+  "fatherNameBangla": "Father's name in Bengali. DO NOT include label prefix ('পিতা:', 'পিতার নাম:') and DO NOT include nationality ('বাংলাদেশী')",
+  "fatherNameEnglish": "Father's name in English in ALL CAPS. If not written on card (e.g. Smart NID), transliterate the Bengali father name into standard Bangladeshi English. NEVER leave blank if Bengali father name exists!",
+  "motherNameBangla": "Mother's name in Bengali. DO NOT include label prefix ('মাতা:', 'মাতার নাম:') and DO NOT include nationality ('বাংলাদেশী')",
+  "motherNameEnglish": "Mother's name in English in ALL CAPS. If not written on card (e.g. Smart NID), transliterate the Bengali mother name into standard Bangladeshi English. NEVER leave blank if Bengali mother name exists!",
+  "nidNumber": "10-digit Smart Card NID, 13/17-digit old NID, or 17-digit Birth Certificate number. Clean digits only, convert Bengali digits (০-৯) to Arabic digits (0-9).",
+  "dateOfBirth": "Date of birth strictly formatted as DD-MM-YYYY (e.g. '15-10-1990'). In Bangladesh official documents, day ALWAYS precedes month (DD-MM-YYYY), NEVER MM-DD-YYYY. Convert Bengali months and numerals to English."
+}
+
+CRITICAL RULES FOR ACCURACY:
+1. NAME AND HONORIFIC STANDARDIZATION:
+   - 'মোছাঃ' or 'মোসাঃ' in Bengali MUST be 'MST.' in English (e.g. 'মোছাঃ রেহানা খাতুন' -> 'MST. REHANA KHATUN'). NEVER output 'MOSA:'.
+   - 'মোঃ' or 'মুঃ' in Bengali MUST be 'MD.' in English (e.g. 'মোঃ রফিকুল ইসলাম' -> 'MD. RAFIQUL ISLAM'). NEVER output 'MD:'.
+   - 'বেগম' -> 'BEGUM', 'খাতুন' -> 'KHATUN', 'আক্তার' -> 'AKTER', 'চৌধুরী' -> 'CHOWDHURY', 'হোসেন' -> 'HOSSAIN', 'হক' -> 'HAQUE', 'উদ্দিন' -> 'UDDIN'.
+
+2. FATHER & MOTHER'S NAMES:
+   - For NID Smart Cards, English father and mother names are NOT printed on the card front. You MUST transliterate the Bengali father and mother names into standard Bangladeshi English (ALL CAPS).
+   - In Digital Birth Certificates, Bengali is on the left and English is on the right. Immediately below the name is 'জাতীয়তা: বাংলাদেশী' / 'Nationality: Bangladeshi'. NEVER include 'বাংলাদেশী' or 'Bangladeshi' inside father or mother names!
+   - Exclude markers like '(মৃত)' or '(Late)'.
+
+3. DATE OF BIRTH:
+   - MUST be formatted strictly as DD-MM-YYYY (2-digit day, 2-digit month, 4-digit year).
+   - If written as '10 Jan 1995' or '১০ জানুয়ারি ১৯৯৫', format as '10-01-1995'.
+   - If written as numeric '05/08/1990', in Bangladesh this ALWAYS means 5th of August 1990 ('05-08-1990'), NOT May 8th!
+   - In birth certificates, ignore the written Bengali words under the numbers (e.g. 'পাঁচই আগস্ট...'), extract the numeric date.
+
+4. NID / BIRTH REGISTRATION NUMBER:
+   - Clean digits only.
+   - Smart Card = 10 digits. Old NID = 13 or 17 digits. Birth Certificate = 17 digits.
+`;
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,8 +81,13 @@ export async function POST(req: NextRequest) {
     }
 
     const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    // Use gemini-3.5-flash-lite as verified working on the free tier
-    const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
+
+    // Active verified models on this API key (flash-lite gives ~1s response time and high reliability)
+    const candidateModels = [
+      "gemini-3.5-flash-lite",
+      "gemini-flash-lite-latest",
+      "gemini-3.5-flash",
+    ];
 
     const results = [];
 
@@ -46,42 +96,22 @@ export async function POST(req: NextRequest) {
       // Strip data url prefix if present
       const base64Data = rawImg.replace(/^data:image\/[a-zA-Z+]+;base64,/, "");
 
-      const prompt = `
-You are an expert OCR and document data extractor specializing in Bangladeshi National Identity Cards (NID Smart Card and Old Laminated Cards) and Bangladesh Digital Birth Registration Certificates (জন্ম নিবন্ধন সনদ).
-
-Analyze the provided image and extract the following information accurately.
-Return ONLY a valid, raw JSON object (do not wrap in markdown \`\`\`json fences, just plain JSON).
-
-Schema:
-{
-  "docType": "nid" or "birth_certificate",
-  "nameBangla": "Full name in Bengali exactly as written",
-  "nameEnglish": "Full name in English (ALL CAPS). If English name is not written on the card, transliterate the Bengali name accurately into standard Bangladeshi English. CRITICAL RULES: 'মোছাঃ' or 'মোসাঃ' MUST be 'MST.' (e.g. 'মোছাঃ রেহানা খাতুন' -> 'MST. REHANA KHATUN', NEVER use 'MOSA:'). 'মোঃ' or 'মুঃ' MUST be 'MD.' (e.g. 'মোঃ রফিকুল ইসলাম' -> 'MD. RAFIQUL ISLAM'). 'বেগম' -> 'BEGUM', 'খাতুন' -> 'KHATUN'.",
-  "fatherNameBangla": "Father's name in Bengali",
-  "fatherNameEnglish": "Father's name in English (ALL CAPS). CRITICAL: If English father name is NOT printed on the card (common in old NIDs and birth certificates), you MUST transliterate the Bengali father name accurately into standard Bangladeshi English (e.g. 'মোঃ আব্দুল জলিল' -> 'MD. ABDUL JALIL'). NEVER leave it blank if Bengali father name exists!",
-  "motherNameBangla": "Mother's name in Bengali",
-  "motherNameEnglish": "Mother's name in English (ALL CAPS). CRITICAL: If English mother name is NOT printed on the card, you MUST transliterate the Bengali mother name accurately into standard Bangladeshi English (e.g. 'মোছাঃ রেহানা খাতুন' -> 'MST. REHANA KHATUN'). NEVER leave it blank if Bengali mother name exists!",
-  "nidNumber": "The 10-digit Smart Card NID number, 13-digit old NID number, 17-digit old NID number, or 17-digit Birth Certificate Registration Number. Clean digits only, convert Bengali digits (০-৯) to English (0-9).",
-  "dateOfBirth": "Date of birth strictly formatted as DD-MM-YYYY (e.g., '10 Jan 2001' or '10/01/2001' or '১০ জানু ২০০১' MUST be '10-01-2001'). Always 2-digit day, 2-digit month, 4-digit year."
-}
-
-Rules:
-1. Do not invent numbers. Extract the exact NID or Birth Registration number.
-2. Date of birth MUST be formatted as DD-MM-YYYY.
-3. For names where English is missing on the document, follow standard official Bangladeshi transliteration (মোছাঃ/মোসাঃ -> MST., মোঃ -> MD.).
-4. Return ONLY valid JSON.
-`;
-
-      // Active working Gemini models verified for this API key
-      const candidateModels = ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-flash-lite-latest"];
-      let parsed = null;
+      let parsed: any = null;
       let lastError: any = null;
 
       for (const mName of candidateModels) {
-        // Try up to 2 attempts per model to gracefully handle temporary 429 rate limits or 503 spikes
         for (let attempt = 1; attempt <= 2; attempt++) {
           try {
-            const model = genAI.getGenerativeModel({ model: mName });
+            const model = genAI.getGenerativeModel({
+              model: mName,
+              systemInstruction: SYSTEM_INSTRUCTION,
+              generationConfig: {
+                temperature: 0.1,
+                topP: 0.95,
+                responseMimeType: "application/json",
+              },
+            });
+
             const response = await model.generateContent([
               {
                 inlineData: {
@@ -89,21 +119,32 @@ Rules:
                   mimeType: mimeType || "image/jpeg",
                 },
               },
-              prompt,
+              EXTRACTION_PROMPT,
             ]);
 
             const rawText = response.response.text().trim();
-            const cleanedJson = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-            parsed = JSON.parse(cleanedJson);
+            let jsonString = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+            const objMatch = rawText.match(/\{[\s\S]*\}/);
+            const arrMatch = rawText.match(/\[[\s\S]*\]/);
+            if (objMatch && (!arrMatch || (objMatch.index ?? 0) <= (arrMatch.index ?? 0))) {
+              jsonString = objMatch[0];
+            } else if (arrMatch) {
+              jsonString = arrMatch[0];
+            }
+            let rawParsed = JSON.parse(jsonString);
+            parsed = Array.isArray(rawParsed) ? (rawParsed[0] || {}) : rawParsed;
             break; // successfully parsed
           } catch (mErr: any) {
             lastError = mErr;
             const errMsg = mErr?.message || "";
-            const isRetryable = errMsg.includes("429") || errMsg.includes("503") || errMsg.includes("RESOURCE_EXHAUSTED");
+            const isRetryable =
+              errMsg.includes("429") ||
+              errMsg.includes("503") ||
+              errMsg.includes("RESOURCE_EXHAUSTED");
 
             if (isRetryable && attempt < 2) {
-              console.warn(`Model ${mName} temporarily busy (attempt ${attempt}), waiting 1.5s...`);
-              await new Promise((r) => setTimeout(r, 1500));
+              console.warn(`Model ${mName} temporarily busy (attempt ${attempt}), waiting 1.2s...`);
+              await new Promise((r) => setTimeout(r, 1200));
             } else {
               console.warn(`Model ${mName} failed:`, errMsg);
               break; // try next candidate model
@@ -113,27 +154,19 @@ Rules:
         if (parsed) break;
       }
 
-
       if (parsed) {
-        // Normalize DOB to DD-MM-YYYY format just in case
-        if (parsed.dateOfBirth) {
-          parsed.dateOfBirth = normalizeDateString(parsed.dateOfBirth);
-        }
-
-        // Clean NID number digits
-        if (parsed.nidNumber) {
-          parsed.nidNumber = parsed.nidNumber.replace(/[^\d]/g, "");
-        }
+        // High-accuracy sanitization and auto-completion pipeline
+        const sanitized = sanitizeExtractedDocument(parsed);
 
         results.push({
           memberIndex: i + 1,
-          ...parsed,
+          ...sanitized,
         });
       } else {
         console.error(`All OCR models failed for image ${i + 1}:`, lastError);
         results.push({
           memberIndex: i + 1,
-          docType: "nid",
+          docType: "nid" as const,
           nameBangla: "",
           nameEnglish: "",
           fatherNameBangla: "",
@@ -168,30 +201,4 @@ Rules:
       { status: 500 }
     );
   }
-}
-
-function normalizeDateString(dateStr: string): string {
-  if (!dateStr) return "";
-  // Check if already DD-MM-YYYY
-  if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) return dateStr;
-
-  // DD/MM/YYYY or DD.MM.YYYY
-  const parts = dateStr.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
-  if (parts) {
-    const d = parts[1].padStart(2, "0");
-    const m = parts[2].padStart(2, "0");
-    const y = parts[3];
-    return `${d}-${m}-${y}`;
-  }
-
-  // YYYY-MM-DD
-  const isoParts = dateStr.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
-  if (isoParts) {
-    const y = isoParts[1];
-    const m = isoParts[2].padStart(2, "0");
-    const d = isoParts[3].padStart(2, "0");
-    return `${d}-${m}-${y}`;
-  }
-
-  return dateStr;
 }

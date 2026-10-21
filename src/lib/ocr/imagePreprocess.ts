@@ -158,7 +158,7 @@ export async function cropImageToBox(
  * Compresses an image file or dataUrl to an optimal size and resolution for OCR.
  * Resizes large camera photos (e.g. 12MP-50MP from phones/tablets) down to max 1600px
  * and compresses as JPEG with 0.82 quality. This reduces 5-10MB files to ~150-250KB,
- * keeping text razor-sharp while preventing Vercel's 4.5MB 413 Payload Too Large error.
+ * keeping text razor-sharp while preventing payload size errors.
  */
 export async function compressImageForUpload(
   fileOrDataUrl: File | string,

@@ -28,6 +28,9 @@ export async function POST(req: NextRequest) {
     if (typeof body.hideRecentScans === "boolean") {
       config.hideRecentScans = body.hideRecentScans;
     }
+    if (typeof body.showActiveUsersTicker === "boolean") {
+      config.showActiveUsersTicker = body.showActiveUsersTicker;
+    }
     if (body.noticeMessage !== undefined) {
       config.noticeMessage = body.noticeMessage;
     }

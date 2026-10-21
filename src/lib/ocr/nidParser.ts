@@ -1,5 +1,6 @@
 import { ExtractedNIDFields, OCRResult } from "@/types/nid";
 import { isValidCalendarDate } from "../validation/nidSchema";
+import { sanitizeExtractedDocument } from "./nidSanitizer";
 
 /**
  * Bengali to English digit translation map
@@ -398,6 +399,17 @@ export function parseBangladeshNIDText(rawText: string, ocrConfidence = 80): OCR
       }
     }
   }
+
+  // Apply specialized Bangladeshi document sanitizer
+  const sanitized = sanitizeExtractedDocument(fields);
+  fields.nameBangla = sanitized.nameBangla;
+  fields.nameEnglish = sanitized.nameEnglish;
+  fields.fatherNameBangla = sanitized.fatherNameBangla;
+  fields.fatherNameEnglish = sanitized.fatherNameEnglish;
+  fields.motherNameBangla = sanitized.motherNameBangla;
+  fields.motherNameEnglish = sanitized.motherNameEnglish;
+  fields.nidNumber = sanitized.nidNumber;
+  fields.dateOfBirth = sanitized.dateOfBirth;
 
   // Detect card type
   let cardTypeDetected: "smart_card" | "old_laminated" | "unknown" = "unknown";

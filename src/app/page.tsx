@@ -327,11 +327,19 @@ export default function ScannerHomePage() {
     }
   };
 
-  // 2. ADD ANOTHER ACTION
+  // 2. ADD ANOTHER ACTION (Gallery/Files)
   const handleAddAnother = () => {
     if (checkBlocked()) return;
     if (fileInputRef.current) {
       fileInputRef.current.click();
+    }
+  };
+
+  // Direct Camera Capture Action
+  const handleUseCamera = () => {
+    if (checkBlocked()) return;
+    if (cameraInputRef.current) {
+      cameraInputRef.current.click();
     }
   };
 
@@ -562,7 +570,7 @@ export default function ScannerHomePage() {
                 </Link>
               )}
 
-              {/* Add Another Member */}
+              {/* Add Another Member (Gallery / File Picker) */}
               <button
                 onClick={handleAddAnother}
                 disabled={isScanning || isProcessingFiles}
@@ -574,6 +582,20 @@ export default function ScannerHomePage() {
                   <Plus className="w-3.5 h-3.5" />
                 )}
                 Add Another
+              </button>
+
+              {/* Use Camera (Direct Camera Capture) */}
+              <button
+                onClick={handleUseCamera}
+                disabled={isScanning || isProcessingFiles}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-white text-slate-700 hover:text-brand-800 border border-slate-200 hover:bg-slate-50 transition-colors shadow-2xs disabled:opacity-40"
+              >
+                {isScanning || isProcessingFiles ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Camera className="w-3.5 h-3.5 text-brand-700" />
+                )}
+                Use Camera
               </button>
 
               {/* Retake / Reset */}

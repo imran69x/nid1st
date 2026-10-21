@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { updateUserProfilePic, resizeImageToAvatar } from "@/lib/services/userService";
 import toast from "react-hot-toast";
+import { ActiveUsersTicker } from "./ActiveUsersTicker";
 
 export function HeaderAndSidebar() {
   const [isOpen, setIsOpen] = useState(false);
@@ -40,6 +41,8 @@ export function HeaderAndSidebar() {
   const displayName = currentUser?.name || currentUser?.username || "User";
   const showRecentButton = isAdmin || !systemConfig.hideRecentScans;
   const initial = (displayName.charAt(0) || "U").toUpperCase();
+
+
 
   // User can only change their profile picture ONCE unless they are Admin
   const hasUsedChange = !isAdmin && Boolean(currentUser?.profilePicChangedByUser);
@@ -116,6 +119,8 @@ export function HeaderAndSidebar() {
 
           {/* User Status & Navigation Links */}
           <div className="flex items-center gap-2 sm:gap-3">
+
+
             {currentUser ? (
               <>
                 {/* Recent Scans shortcut link */}
@@ -134,35 +139,31 @@ export function HeaderAndSidebar() {
                   </Link>
                 )}
 
-                {/* Round Profile Picture & Display Name */}
+                {/* Round Profile Picture & Display Name (User ID phone number completely hidden as requested) */}
                 <div
                   onClick={() => setIsProfileModalOpen(true)}
-                  className="flex items-center gap-2 cursor-pointer p-1 -mr-1 rounded-xl hover:bg-slate-100/80 transition-colors"
+                  className="flex items-center gap-2 cursor-pointer py-1 px-1.5 rounded-xl hover:bg-slate-100/80 transition-colors"
                   title="Click to view/change profile"
                 >
                   {currentUser.profilePic ? (
                     <img
                       src={currentUser.profilePic}
                       alt={displayName}
-                      className="w-8 h-8 rounded-full object-cover border border-slate-300 shadow-2xs"
+                      className="w-8 h-8 rounded-full object-cover ring-2 ring-emerald-500/50 shadow-2xs shrink-0"
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-700 to-indigo-700 text-white flex items-center justify-center font-extrabold text-xs shadow-2xs">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-700 to-indigo-700 text-white flex items-center justify-center font-extrabold text-xs shadow-2xs ring-2 ring-emerald-500/50 shrink-0">
                       {initial}
                     </div>
                   )}
 
-                  <div className="text-right hidden sm:block">
-                    <div className="text-xs font-bold text-slate-800 flex items-center justify-end gap-1">
+                  <div className="text-left hidden sm:block">
+                    <div className="text-xs font-bold text-slate-800 leading-tight">
                       {displayName}
                     </div>
-                    <div className="text-[10px] text-slate-500">
-                      {currentUser.name && currentUser.name !== currentUser.username && (
-                        <span className="mr-1 font-mono text-[9px] bg-slate-100 px-1 py-0.2 rounded">
-                          {currentUser.username}
-                        </span>
-                      )}
-                      {isAdmin ? "Administrator" : "Active Member"}
+                    <div className="text-[10px] font-medium text-slate-500 flex items-center gap-1 mt-0.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                      <span>{isAdmin ? "Administrator" : "Active Member"}</span>
                     </div>
                   </div>
                 </div>
@@ -197,6 +198,11 @@ export function HeaderAndSidebar() {
         </div>
       </header>
 
+      {/* Premium Live Active Users Ticker Bar (Controlled by Admin Panel ON/OFF toggle) */}
+      {currentUser && pathname !== "/login" && systemConfig.showActiveUsersTicker !== false && (
+        <ActiveUsersTicker />
+      )}
+
       {/* Slide-over Drawer / Sidebar - ALWAYS opens on click of 3-line bar */}
       {isOpen && (
         <div className="fixed inset-0 z-50 flex">
@@ -226,6 +232,8 @@ export function HeaderAndSidebar() {
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+
 
             {/* Nav Links */}
             <div className="p-3 flex-1 space-y-1">

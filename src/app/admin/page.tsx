@@ -47,6 +47,7 @@ import {
   Edit,
   Camera,
   Upload,
+  Zap,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -131,9 +132,13 @@ export default function AdminPage() {
   const [hideRecentScans, setHideRecentScans] = useState(
     Boolean(systemConfig.hideRecentScans)
   );
+  const [showActiveUsersTicker, setShowActiveUsersTicker] = useState(
+    systemConfig.showActiveUsersTicker !== false
+  );
   const [updatingConfig, setUpdatingConfig] = useState(false);
   const [updatingDeletePerm, setUpdatingDeletePerm] = useState(false);
   const [updatingHideRecent, setUpdatingHideRecent] = useState(false);
+  const [updatingTicker, setUpdatingTicker] = useState(false);
 
   // Recent Scans Page State
   const [recentScans, setRecentScans] = useState<RecentScanRecord[]>([]);
@@ -163,6 +168,7 @@ export default function AdminPage() {
     setScanningEnabled(systemConfig.scanningEnabled);
     setAllowUserDeleteRecent(Boolean(systemConfig.allowUserDeleteRecent));
     setHideRecentScans(Boolean(systemConfig.hideRecentScans));
+    setShowActiveUsersTicker(systemConfig.showActiveUsersTicker !== false);
   }, [systemConfig]);
 
   const loadUsers = async () => {
@@ -363,6 +369,26 @@ export default function AdminPage() {
       toast.error(err.message || "Failed to update recent visibility");
     } finally {
       setUpdatingHideRecent(false);
+    }
+  };
+
+  // 5e. Toggle Active Users Ticker Bar visibility
+  const handleToggleActiveUsersTicker = async () => {
+    const nextVal = !showActiveUsersTicker;
+    setUpdatingTicker(true);
+    try {
+      await updateSystemConfig({ showActiveUsersTicker: nextVal });
+      setShowActiveUsersTicker(nextVal);
+      await refreshConfig();
+      toast.success(
+        nextVal
+          ? "অ্যাক্টিভ ইউজার বার চালু করা হয়েছে (ON - Active Users Bar Visible)"
+          : "অ্যাক্টিভ ইউজার বার বন্ধ করা হয়েছে (OFF - Active Users Bar Hidden)"
+      );
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update ticker setting");
+    } finally {
+      setUpdatingTicker(false);
     }
   };
 
@@ -1609,6 +1635,65 @@ export default function AdminPage() {
                     <>
                       <EyeOff className="w-4 h-4" />
                       ইউজারদের থেকে বাটন লুকান (Hide Recent)
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Card 4: Active Users Ticker Bar Toggle (Requested Feature) */}
+              <div className="p-6 rounded-3xl border border-slate-200 bg-slate-50/70 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white font-bold shadow-xs ${
+                      showActiveUsersTicker ? "bg-emerald-600" : "bg-slate-700"
+                    }`}
+                  >
+                    <Zap className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                      অ্যাক্টিভ ইউজার নোটিফিকেশন বার (Active Users Bar)
+                    </h3>
+                    <p className="text-[11px] text-slate-500">Show / Hide Live Active Users Ticker Bar</p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-white border border-slate-200 text-xs text-slate-600 space-y-1">
+                  <div className="font-bold text-slate-800">
+                    বর্তমান অবস্থা:{" "}
+                    {showActiveUsersTicker ? (
+                      <span className="text-emerald-700 font-extrabold">চালু (ON - দৃশ্যমান)</span>
+                    ) : (
+                      <span className="text-rose-700 font-extrabold">বন্ধ (OFF - সম্পূর্ণ লুকানো)</span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-500 leading-relaxed">
+                    {showActiveUsersTicker
+                      ? "হেডারের নিচে অ্যাক্টিভ ইউজারদের প্রোফাইল ছবি ও স্ক্যান কাউন্টের স্ক্রলিং নোটিফিকেশন চালু রয়েছে।"
+                      : "অ্যাক্টিভ ইউজার স্ক্রলিং টিকার বারটি বন্ধ রাখা হয়েছে (কাউকে দেখানো হবে না)।"}
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleToggleActiveUsersTicker}
+                  disabled={updatingTicker}
+                  className={`w-full py-3 px-4 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 ${
+                    showActiveUsersTicker
+                      ? "bg-rose-600 hover:bg-rose-700 text-white"
+                      : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                  }`}
+                >
+                  {updatingTicker ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : showActiveUsersTicker ? (
+                    <>
+                      <Power className="w-4 h-4" />
+                      বারটি বন্ধ করুন (Turn OFF Bar)
+                    </>
+                  ) : (
+                    <>
+                      <Power className="w-4 h-4" />
+                      বারটি চালু করুন (Turn ON Bar)
                     </>
                   )}
                 </button>
