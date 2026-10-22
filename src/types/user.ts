@@ -7,7 +7,9 @@ export interface DatabaseUser {
   isBlocked: boolean;
   createdAt: number;
   passwordUpdatedAt?: number;
-  scanCount: number;
+  scanCount: number; // Lifetime total scans
+  dailyScanCount?: number; // Daily scans count for current day (resets daily)
+  lastScanDate?: string; // YYYY-MM-DD date of last scan
   canDeleteRecent?: boolean; // Admin approved permission to delete recent scans
   profilePic?: string; // Base64 data URL or image URL for round profile picture
   profilePicChangedByUser?: boolean; // Whether regular user has used their 1-time profile picture change

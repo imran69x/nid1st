@@ -804,6 +804,11 @@ export default function AdminPage() {
                         <span className="inline-flex items-center gap-1 font-bold text-brand-800 bg-brand-50 px-2 py-0.5 rounded-md border border-brand-200">
                           <FileCheck2 className="w-3.5 h-3.5 text-brand-600" />
                           মোট স্ক্যান: {u.scanCount || 0} টি
+                          {Boolean(u.dailyScanCount) && (
+                            <span className="text-[11px] font-semibold text-emerald-700 ml-1">
+                              (আজ: {u.dailyScanCount} টি)
+                            </span>
+                          )}
                         </span>
                         <span>•</span>
                         <span>

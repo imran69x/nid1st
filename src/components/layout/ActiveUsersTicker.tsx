@@ -7,7 +7,9 @@ interface ActiveUser {
   id: string;
   name: string;
   profilePic?: string;
+  dailyScanCount?: number;
   scanCount: number;
+  totalScanCount?: number;
   isAdmin: boolean;
 }
 
@@ -33,9 +35,18 @@ export function ActiveUsersTicker() {
 
   useEffect(() => {
     fetchUsers();
-    // Refresh every 25 seconds for live scan count updates
-    const interval = setInterval(fetchUsers, 25000);
-    return () => clearInterval(interval);
+
+    const handleScanCompleted = () => {
+      fetchUsers();
+    };
+    window.addEventListener("scanCompleted", handleScanCompleted);
+
+    // Refresh every 20 seconds for live daily scan count updates
+    const interval = setInterval(fetchUsers, 20000);
+    return () => {
+      window.removeEventListener("scanCompleted", handleScanCompleted);
+      clearInterval(interval);
+    };
   }, []);
 
   if (loading && users.length === 0) {
@@ -107,9 +118,16 @@ export function ActiveUsersTicker() {
                     </span>
                   )}
 
-                  {/* Scan Count Badge */}
-                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                    {user.scanCount} {user.scanCount === 1 ? "Scan" : "Scans"}
+                  {/* Daily Scan Count Badge (Resets automatically to 0 on date change) */}
+                  <span
+                    className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 shadow-2xs"
+                    title="Today's scans (Resets to 0 daily at 12:00 AM)"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span>
+                      {(user.dailyScanCount ?? user.scanCount) || 0}{" "}
+                      {((user.dailyScanCount ?? user.scanCount) || 0) === 1 ? "Scan" : "Scans"}
+                    </span>
                   </span>
                 </div>
               );

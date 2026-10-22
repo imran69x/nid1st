@@ -170,6 +170,9 @@ export default function ScannerHomePage() {
 
         setSelectedImages((prev) => [...prev, ...compressedList]);
         toast.success(`Successfully added ${totalNew} member(s)!`, { id: toastId });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("scanCompleted"));
+        }
 
         // Update the recent scan record with all members
         const allMembers = [...members, ...newAddedMembers];
@@ -297,6 +300,9 @@ export default function ScannerHomePage() {
       }
 
       toast.success(`Successfully scanned ${total} member(s)!`, { id: toastId });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("scanCompleted"));
+      }
 
       // Automatically save to Recent Scans with the 1st card's name as title
       if (extractedSoFar.length > 0) {

@@ -77,6 +77,8 @@ export async function ensureDefaultAdmin(): Promise<void> {
       createdAt: Date.now(),
       passwordUpdatedAt: Date.now(),
       scanCount: 0,
+      dailyScanCount: 0,
+      lastScanDate: "",
     };
     await setDoc(adminDocRef, adminUser);
     console.log("[Store] Default admin user seeded into Firestore:", username);
@@ -96,6 +98,29 @@ export async function ensureDefaultAdmin(): Promise<void> {
 }
 
 /**
+ * Get current date string formatted as YYYY-MM-DD in Asia/Dhaka time zone
+ */
+export function getDhakaDateString(): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Dhaka",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === "year")?.value || "";
+    const m = parts.find((p) => p.type === "month")?.value || "";
+    const d = parts.find((p) => p.type === "day")?.value || "";
+    return `${y}-${m}-${d}`;
+  } catch {
+    const now = new Date();
+    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+    const bd = new Date(utc + 6 * 3600000);
+    return bd.toISOString().slice(0, 10);
+  }
+}
+
+/**
  * Read all users from Firestore 'users' collection
  */
 export async function readUsers(): Promise<DatabaseUser[]> {
@@ -104,9 +129,11 @@ export async function readUsers(): Promise<DatabaseUser[]> {
 
   const snapshot = await getDocs(collection(db, USERS_COLLECTION));
   const users: DatabaseUser[] = [];
+  const today = getDhakaDateString();
 
   snapshot.forEach((docSnap) => {
     const data = docSnap.data();
+    const isToday = data.lastScanDate === today;
     users.push({
       id: docSnap.id,
       username: data.username || "",
@@ -117,6 +144,8 @@ export async function readUsers(): Promise<DatabaseUser[]> {
       createdAt: data.createdAt || Date.now(),
       passwordUpdatedAt: data.passwordUpdatedAt || data.createdAt || 0,
       scanCount: typeof data.scanCount === "number" ? data.scanCount : 0,
+      dailyScanCount: isToday && typeof data.dailyScanCount === "number" ? data.dailyScanCount : 0,
+      lastScanDate: data.lastScanDate || "",
       canDeleteRecent: Boolean(data.canDeleteRecent),
       profilePic: data.profilePic || "",
       profilePicChangedByUser: Boolean(data.profilePicChangedByUser),
@@ -142,6 +171,8 @@ export async function writeUser(user: DatabaseUser): Promise<void> {
     createdAt: user.createdAt || Date.now(),
     passwordUpdatedAt: user.passwordUpdatedAt || user.createdAt || Date.now(),
     scanCount: typeof user.scanCount === "number" ? user.scanCount : 0,
+    dailyScanCount: typeof user.dailyScanCount === "number" ? user.dailyScanCount : 0,
+    lastScanDate: user.lastScanDate || "",
     canDeleteRecent: Boolean(user.canDeleteRecent),
     profilePic: user.profilePic || "",
     profilePicChangedByUser: Boolean(user.profilePicChangedByUser),
@@ -176,6 +207,8 @@ export async function findUserById(userId: string): Promise<DatabaseUser | null>
   if (!snap.exists()) return null;
 
   const data = snap.data();
+  const today = getDhakaDateString();
+  const isToday = data.lastScanDate === today;
   return {
     id: snap.id,
     username: data.username || "",
@@ -186,14 +219,18 @@ export async function findUserById(userId: string): Promise<DatabaseUser | null>
     createdAt: data.createdAt || Date.now(),
     passwordUpdatedAt: data.passwordUpdatedAt || data.createdAt || 0,
     scanCount: typeof data.scanCount === "number" ? data.scanCount : 0,
+    dailyScanCount: isToday && typeof data.dailyScanCount === "number" ? data.dailyScanCount : 0,
+    lastScanDate: data.lastScanDate || "",
     canDeleteRecent: Boolean(data.canDeleteRecent),
     profilePic: data.profilePic || "",
     profilePicChangedByUser: Boolean(data.profilePicChangedByUser),
   };
 }
 
+
+
 /**
- * Increment scan count for a user
+ * Increment scan count for a user (both lifetime total and daily scan count)
  */
 export async function incrementUserScanCount(userIdOrUsername: string, count = 1): Promise<void> {
   const users = await readUsers();
@@ -201,7 +238,19 @@ export async function incrementUserScanCount(userIdOrUsername: string, count = 1
     (u) => u.id === userIdOrUsername || u.username.toLowerCase() === userIdOrUsername.toLowerCase()
   );
   if (target) {
+    const today = getDhakaDateString();
+    
+    // Lifetime total scans (retained permanently for Admin Panel & user records)
     target.scanCount = (target.scanCount || 0) + count;
+
+    // Daily scan count (resets to count on date change)
+    if (target.lastScanDate === today) {
+      target.dailyScanCount = (target.dailyScanCount || 0) + count;
+    } else {
+      target.lastScanDate = today;
+      target.dailyScanCount = count;
+    }
+
     await writeUser(target);
   }
 }
