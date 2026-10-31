@@ -163,7 +163,7 @@ export async function PUT(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { userId, isBlocked, canDeleteRecent, allUsers } = body;
+    const { userId, isBlocked, canDeleteRecent, canAutoCapture, allUsers } = body;
 
     // Bulk toggle delete permission for all non-admin users
     if (allUsers && typeof canDeleteRecent === "boolean") {
@@ -209,6 +209,10 @@ export async function PATCH(req: NextRequest) {
 
     if (typeof canDeleteRecent === "boolean") {
       targetUser.canDeleteRecent = Boolean(canDeleteRecent);
+    }
+
+    if (typeof canAutoCapture === "boolean") {
+      targetUser.canAutoCapture = Boolean(canAutoCapture);
     }
 
     await writeUser(targetUser);

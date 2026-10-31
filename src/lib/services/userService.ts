@@ -282,6 +282,25 @@ export async function toggleUserRecentDeletePermission(
 }
 
 /**
+ * Toggle user auto capture permission (Admin only)
+ */
+export async function toggleUserAutoCapturePermission(
+  userId: string,
+  canAutoCapture: boolean
+): Promise<void> {
+  const res = await fetch("/api/admin/users", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId, canAutoCapture }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || "Failed to update auto-capture permission");
+  }
+}
+
+/**
  * Toggle recent delete permission for ALL non-admin users at once (Admin only)
  */
 export async function toggleAllUsersRecentDeletePermission(

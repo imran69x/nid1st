@@ -13,6 +13,7 @@ import {
   deleteRecentScanRecord,
   deleteAllRecentScansForUser,
   toggleUserRecentDeletePermission,
+  toggleUserAutoCapturePermission,
   toggleAllUsersRecentDeletePermission,
   updateUserByAdmin,
   resizeImageToAvatar,
@@ -149,6 +150,7 @@ export default function AdminPage() {
   const [deletingAllForUser, setDeletingAllForUser] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [updatingPermUserId, setUpdatingPermUserId] = useState<string | null>(null);
+  const [updatingAutoCaptureUserId, setUpdatingAutoCaptureUserId] = useState<string | null>(null);
   const [updatingAllPerm, setUpdatingAllPerm] = useState(false);
 
   useEffect(() => {
@@ -329,6 +331,28 @@ export default function AdminPage() {
       toast.error(err.message || "পারমিশন পরিবর্তন করা যায়নি");
     } finally {
       setUpdatingPermUserId(null);
+    }
+  };
+
+  // 5b-2. Toggle Individual User Auto Capture Permission
+  const handleToggleAutoCapture = async (user: DatabaseUser, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const nextVal = !user.canAutoCapture;
+    setUpdatingAutoCaptureUserId(user.id);
+    try {
+      await toggleUserAutoCapturePermission(user.id, nextVal);
+      toast.success(
+        nextVal
+          ? `'${user.name || user.username}'-কে Auto Capture অনুমতি দেওয়া হয়েছে!`
+          : `'${user.name || user.username}'-এর Auto Capture অনুমতি বন্ধ করা হয়েছে।`
+      );
+      setUsers((prev) =>
+        prev.map((u) => (u.id === user.id ? { ...u, canAutoCapture: nextVal } : u))
+      );
+    } catch (err: any) {
+      toast.error(err.message || "Auto Capture পারমিশন পরিবর্তন করা যায়নি");
+    } finally {
+      setUpdatingAutoCaptureUserId(null);
     }
   };
 
@@ -867,6 +891,38 @@ export default function AdminPage() {
                             <>
                               <Unlock className="w-3.5 h-3.5" />
                               <span>অনুমোদন দিন</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+
+                      {/* Auto Capture Permission Button */}
+                      {!u.isAdmin && (
+                        <button
+                          onClick={(e) => handleToggleAutoCapture(u, e)}
+                          disabled={updatingAutoCaptureUserId === u.id}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-2xs ${
+                            u.canAutoCapture
+                              ? "bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-300"
+                              : "bg-slate-100 text-slate-600 hover:bg-purple-50 hover:text-purple-700 border border-slate-200"
+                          }`}
+                          title={
+                            u.canAutoCapture
+                              ? "Auto Capture সক্রিয় (ক্লিক করে বন্ধ করুন)"
+                              : "Auto Capture বন্ধ (ক্লিক করে সক্রিয় করুন)"
+                          }
+                        >
+                          {updatingAutoCaptureUserId === u.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : u.canAutoCapture ? (
+                            <>
+                              <Camera className="w-3.5 h-3.5 stroke-[2.5] text-purple-600" />
+                              <span>Auto Capture (অন)</span>
+                            </>
+                          ) : (
+                            <>
+                              <Camera className="w-3.5 h-3.5 text-slate-400" />
+                              <span>Auto Capture (অফ)</span>
                             </>
                           )}
                         </button>

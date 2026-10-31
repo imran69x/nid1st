@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
         passwordUpdatedAt: user.passwordUpdatedAt || user.createdAt || 0,
         scanCount: user.scanCount || 0,
         canDeleteRecent: Boolean(user.canDeleteRecent),
+        canAutoCapture: Boolean(user.canAutoCapture),
         profilePic: user.profilePic || "",
         profilePicChangedByUser: Boolean(user.profilePicChangedByUser),
       },

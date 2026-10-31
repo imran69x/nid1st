@@ -16,6 +16,7 @@ import {
   Loader2,
   Trash2,
   History,
+  Sparkles,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -23,6 +24,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect } from "react";
 import { compressImageForUpload } from "@/lib/ocr/imagePreprocess";
+import { AutoCaptureModal } from "@/components/scanner/AutoCaptureModal";
 
 interface ImageItem {
   id: string;
@@ -42,6 +44,7 @@ export default function ScannerHomePage() {
   const [members, setMembers] = useState<ExtractedMember[]>([]);
   const [hasScanned, setHasScanned] = useState(false);
   const [currentScanId, setCurrentScanId] = useState<string | null>(null);
+  const [isAutoCaptureOpen, setIsAutoCaptureOpen] = useState(false);
 
   // Guard against locked/blocked user
   const checkBlocked = () => {
@@ -349,6 +352,82 @@ export default function ScannerHomePage() {
     }
   };
 
+  // Handle Smart Auto Captured Image
+  const handleAutoCapturedImage = async (dataUrl: string, fileName: string) => {
+    if (checkBlocked()) return;
+
+    const newItem: ImageItem = {
+      id: "img_" + Date.now() + "_" + Math.random().toString(36).substring(2, 6),
+      dataUrl,
+      name: fileName,
+    };
+
+    if (hasScanned) {
+      setIsScanning(true);
+      const toastId = toast.loading("অটো ক্যাপচার করা ডকুমেন্ট স্ক্যান হচ্ছে...");
+      try {
+        const res = await fetch("/api/ocr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image: dataUrl,
+            userId: currentUser?.id,
+            username: currentUser?.username,
+            shouldIncrement: true,
+          }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Scan failed with status ${res.status}`);
+        }
+
+        const data = await res.json();
+        const newAddedMembers: ExtractedMember[] = [];
+        if (data.members && Array.isArray(data.members)) {
+          data.members.forEach((m: any) => {
+            const added: ExtractedMember = {
+              ...m,
+              memberIndex: members.length + newAddedMembers.length + 1,
+            };
+            newAddedMembers.push(added);
+            setMembers((prev) => [...prev, added]);
+          });
+        }
+        setSelectedImages((prev) => [...prev, newItem]);
+        toast.success("নতুন সদস্য সফলভাবে যুক্ত হয়েছে!", { id: toastId });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("scanCompleted"));
+        }
+
+        const allMembers = [...members, ...newAddedMembers];
+        if (allMembers.length > 0) {
+          const firstCard = allMembers[0];
+          const cardTitle = firstCard.nameBangla || firstCard.nameEnglish || "NID Document";
+          await fetch("/api/recent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: currentScanId || ("scan_" + Date.now()),
+              title: cardTitle,
+              members: allMembers,
+              userId: currentUser?.id,
+              username: currentUser?.username,
+              userDisplayName: currentUser?.name || currentUser?.username,
+            }),
+          }).catch((err) => console.warn(err));
+        }
+      } catch (err: any) {
+        toast.error(err.message || "ডকুমেন্ট স্ক্যান করা যায়নি", { id: toastId });
+      } finally {
+        setIsScanning(false);
+      }
+    } else {
+      setSelectedImages((prev) => [...prev, newItem]);
+      toast.success("অটো ক্যাপচার সম্পন্ন! স্ক্যান করতে 'Scan' বাটনে চাপ দিন।");
+    }
+  };
+
   // 3. RETAKE / RESET ACTION
   const handleRetake = () => {
     if (checkBlocked()) return;
@@ -454,8 +533,8 @@ export default function ScannerHomePage() {
             </p>
           </div>
 
-          {/* Camera Capture shortcut */}
-          <div className="flex justify-center">
+          {/* Camera Capture shortcut & Auto Capture */}
+          <div className="flex justify-center items-center gap-2.5 flex-wrap">
             <button
               onClick={() => {
                 if (checkBlocked()) return;
@@ -466,6 +545,21 @@ export default function ScannerHomePage() {
               <Camera className="w-4 h-4 text-brand-700" />
               Use Camera
             </button>
+
+            {/* Auto Capture button - ONLY if Admin enabled it for this user or user is Admin */}
+            {(isAdmin || Boolean(currentUser?.canAutoCapture)) && (
+              <button
+                onClick={() => {
+                  if (checkBlocked()) return;
+                  setIsAutoCaptureOpen(true);
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl transition-all shadow-xs"
+                title="স্মার্ট অটো ক্যাপচার (কার্ডের নাম ও তথ্য স্পষ্ট হলে অটো ছবি তুলবে)"
+              >
+                <Sparkles className="w-4 h-4 text-purple-600" />
+                <span>Auto Capture</span>
+              </button>
+            )}
           </div>
 
           {/* Selected documents counter badges */}
@@ -603,6 +697,22 @@ export default function ScannerHomePage() {
                 )}
                 Use Camera
               </button>
+
+              {/* Auto Capture (Only if user has permission or isAdmin) */}
+              {(isAdmin || Boolean(currentUser?.canAutoCapture)) && (
+                <button
+                  onClick={() => {
+                    if (checkBlocked()) return;
+                    setIsAutoCaptureOpen(true);
+                  }}
+                  disabled={isScanning || isProcessingFiles}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition-colors shadow-2xs disabled:opacity-40"
+                  title="স্মার্ট অটো ক্যাপচার (কার্ডের নাম ও তথ্য স্পষ্ট হলে অটো ছবি তুলবে)"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Auto Capture</span>
+                </button>
+              )}
 
               {/* Retake / Reset */}
               <button
@@ -759,6 +869,12 @@ export default function ScannerHomePage() {
         </div>
       )}
 
+      {/* Smart Auto Capture Modal */}
+      <AutoCaptureModal
+        isOpen={isAutoCaptureOpen}
+        onClose={() => setIsAutoCaptureOpen(false)}
+        onCapture={handleAutoCapturedImage}
+      />
     </div>
   );
 }

@@ -89,6 +89,7 @@ export async function GET(req: NextRequest) {
           isBlocked: false,
           passwordUpdatedAt: serverPwTime,
           canDeleteRecent: Boolean(user.canDeleteRecent),
+          canAutoCapture: Boolean(user.canAutoCapture),
           profilePic: user.profilePic || "",
           profilePicChangedByUser: Boolean(user.profilePicChangedByUser),
         },
