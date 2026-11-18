@@ -18,6 +18,9 @@ import {
   Firestore,
 } from "firebase/firestore";
 import { DatabaseUser, SystemConfig, RecentScanRecord } from "@/types/user";
+import { ChatMessage, ChatConversation, ChatParticipant } from "@/types/chat";
+import fs from "fs";
+import path from "path";
 
 // ---- Firebase initialization for server-side API routes ----
 const firebaseConfig = {
@@ -46,6 +49,7 @@ const USERS_COLLECTION = "users";
 const CONFIG_COLLECTION = "system";
 const CONFIG_DOC_ID = "config";
 const RECENT_SCANS_COLLECTION = "recent_scans";
+const CONVERSATIONS_COLLECTION = "conversations";
 
 // ============================================================
 // USER OPERATIONS
@@ -405,4 +409,451 @@ export async function deleteRecentScansForUser(userIdOrUsername: string): Promis
 
   return deletedCount;
 }
+
+// ============================================================
+// CHAT & MESSAGING OPERATIONS
+// ============================================================
+
+const CHAT_CACHE_FILE = path.join(process.cwd(), "data", "chats_cache.json");
+
+interface ChatCacheData {
+  conversations: Record<string, ChatConversation>;
+  messages: Record<string, ChatMessage[]>;
+}
+
+function readChatCache(): ChatCacheData {
+  try {
+    if (fs.existsSync(CHAT_CACHE_FILE)) {
+      const raw = fs.readFileSync(CHAT_CACHE_FILE, "utf-8");
+      return JSON.parse(raw);
+    }
+  } catch (err) {
+    console.warn("[Store] Error reading chat cache file:", err);
+  }
+  return { conversations: {}, messages: {} };
+}
+
+function writeChatCache(data: ChatCacheData): void {
+  try {
+    const dir = path.dirname(CHAT_CACHE_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(CHAT_CACHE_FILE, JSON.stringify(data, null, 2), "utf-8");
+  } catch (err) {
+    console.warn("[Store] Error writing chat cache file:", err);
+  }
+}
+
+/**
+ * Normalize phone numbers to standard format for flexible user search
+ */
+export function normalizePhone(raw: string): string {
+  if (!raw) return "";
+  const digits = raw.replace(/\D/g, "");
+  if (digits.startsWith("880") && digits.length === 13) {
+    return digits.substring(2); // 88017... -> 017...
+  }
+  if (digits.length === 10 && digits.startsWith("1")) {
+    return "0" + digits; // 17... -> 017...
+  }
+  return digits || raw.trim().toLowerCase();
+}
+
+/**
+ * Find user by phone number (username), user ID, or display name
+ */
+export async function findUserByNumberOrId(queryStr: string): Promise<DatabaseUser | null> {
+  const clean = (queryStr || "").trim().toLowerCase();
+  if (!clean) return null;
+  const normalized = normalizePhone(clean);
+  const users = await readUsers();
+
+  return (
+    users.find((u) => {
+      const uUsername = (u.username || "").toLowerCase();
+      const uNorm = normalizePhone(uUsername);
+      const uId = (u.id || "").toLowerCase();
+      const uName = (u.name || "").toLowerCase();
+
+      return (
+        uUsername === clean ||
+        uNorm === normalized ||
+        uId === clean ||
+        uName === clean
+      );
+    }) || null
+  );
+}
+
+/**
+ * Get all conversations for a specific user (Strictly private: only returns conversations where user is participant)
+ */
+export async function getConversationsForUser(
+  userId: string,
+  username?: string
+): Promise<ChatConversation[]> {
+  const db = getServerDb();
+  const cache = readChatCache();
+  const cleanUsername = (username || "").toLowerCase();
+
+  const convList: ChatConversation[] = [];
+
+  try {
+    const snap = await getDocs(collection(db, CONVERSATIONS_COLLECTION));
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as ChatConversation;
+      const participants = data.participants || [];
+      const participantUsernames = (data.participantUsernames || []).map((u) => u.toLowerCase());
+
+      const isParticipant =
+        participants.includes(userId) ||
+        (cleanUsername && participantUsernames.includes(cleanUsername));
+
+      if (isParticipant) {
+        convList.push({
+          id: docSnap.id,
+          participants: data.participants || [],
+          participantUsernames: data.participantUsernames || [],
+          participantDetails: data.participantDetails || {},
+          lastMessage: data.lastMessage || null,
+          createdAt: data.createdAt || Date.now(),
+          updatedAt: data.updatedAt || Date.now(),
+        });
+      }
+    });
+  } catch (err) {
+    console.warn("[Store] Error fetching conversations from Firestore, using cache:", err);
+    Object.values(cache.conversations).forEach((c) => {
+      const isParticipant =
+        c.participants.includes(userId) ||
+        (cleanUsername && c.participantUsernames.map((u) => u.toLowerCase()).includes(cleanUsername));
+      if (isParticipant) {
+        convList.push(c);
+      }
+    });
+  }
+
+  // Calculate unread count for each conversation
+  for (const conv of convList) {
+    let unread = 0;
+    try {
+      const msgs = await getMessagesForConversation(conv.id, userId, username);
+      unread = msgs.filter((m) => m.recipientId === userId && !m.seen).length;
+    } catch {
+      // ignore
+    }
+    conv.unreadCount = unread;
+  }
+
+  // Sort by updatedAt descending
+  convList.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return convList;
+}
+
+/**
+ * Create or retrieve an existing conversation between two users
+ */
+export async function createOrGetConversation(
+  user1: DatabaseUser,
+  user2: DatabaseUser
+): Promise<ChatConversation> {
+  const db = getServerDb();
+  const cache = readChatCache();
+
+  // Deterministic ID so A & B always share the exact same conversation
+  const sortedIds = [user1.id, user2.id].sort();
+  const convId = "conv_" + sortedIds.join("__");
+
+  const participantDetails: Record<string, ChatParticipant> = {
+    [user1.id]: {
+      id: user1.id,
+      username: user1.username,
+      name: user1.name || user1.username,
+      profilePic: user1.profilePic || "",
+    },
+    [user2.id]: {
+      id: user2.id,
+      username: user2.username,
+      name: user2.name || user2.username,
+      profilePic: user2.profilePic || "",
+    },
+  };
+
+  const convDocRef = doc(db, CONVERSATIONS_COLLECTION, convId);
+
+  try {
+    const snap = await getDoc(convDocRef);
+    if (snap.exists()) {
+      const data = snap.data() as ChatConversation;
+      // Refresh participant details (e.g. if name or profile pic updated)
+      await updateDoc(convDocRef, { participantDetails });
+      const updatedConv: ChatConversation = {
+        ...data,
+        participantDetails,
+      };
+      cache.conversations[convId] = updatedConv;
+      writeChatCache(cache);
+      return updatedConv;
+    }
+  } catch (err) {
+    console.warn("[Store] Error checking conversation in Firestore:", err);
+  }
+
+  const newConv: ChatConversation = {
+    id: convId,
+    participants: [user1.id, user2.id],
+    participantUsernames: [user1.username, user2.username],
+    participantDetails,
+    lastMessage: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
+  try {
+    await setDoc(convDocRef, newConv);
+  } catch (err) {
+    console.warn("[Store] Failed to write new conversation to Firestore:", err);
+  }
+
+  cache.conversations[convId] = newConv;
+  writeChatCache(cache);
+
+  return newConv;
+}
+
+/**
+ * Get a single conversation by ID
+ */
+export async function getConversationById(convId: string): Promise<ChatConversation | null> {
+  const db = getServerDb();
+  const cache = readChatCache();
+
+  try {
+    const snap = await getDoc(doc(db, CONVERSATIONS_COLLECTION, convId));
+    if (snap.exists()) {
+      return snap.data() as ChatConversation;
+    }
+  } catch (err) {
+    console.warn("[Store] Error fetching conv by ID from Firestore:", err);
+  }
+
+  return cache.conversations[convId] || null;
+}
+
+/**
+ * Get all messages for a conversation (PRIVACY ENFORCED: user must be participant)
+ */
+export async function getMessagesForConversation(
+  convId: string,
+  userId: string,
+  username?: string
+): Promise<ChatMessage[]> {
+  const conv = await getConversationById(convId);
+  if (!conv) {
+    throw new Error("Conversation not found");
+  }
+
+  const cleanUsername = (username || "").toLowerCase();
+  const isParticipant =
+    conv.participants.includes(userId) ||
+    (cleanUsername && conv.participantUsernames.map((u) => u.toLowerCase()).includes(cleanUsername));
+
+  if (!isParticipant) {
+    throw new Error("Access denied: You are not authorized to view this private chat.");
+  }
+
+  const db = getServerDb();
+  const cache = readChatCache();
+  const messages: ChatMessage[] = [];
+
+  try {
+    const msgsRef = collection(db, CONVERSATIONS_COLLECTION, convId, "messages");
+    const snap = await getDocs(msgsRef);
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as ChatMessage;
+      messages.push({
+        id: docSnap.id,
+        conversationId: convId,
+        senderId: data.senderId,
+        senderName: data.senderName,
+        recipientId: data.recipientId,
+        text: data.text,
+        messageType: data.messageType || (data.text?.startsWith("[sticker:") ? "sticker" : "text"),
+        createdAt: data.createdAt || Date.now(),
+        seen: Boolean(data.seen),
+        seenAt: data.seenAt || null,
+      });
+    });
+  } catch (err) {
+    console.warn("[Store] Error fetching messages from Firestore, using cache:", err);
+    if (cache.messages[convId]) {
+      return [...cache.messages[convId]].sort((a, b) => a.createdAt - b.createdAt);
+    }
+  }
+
+  // Sort ascending by time
+  messages.sort((a, b) => a.createdAt - b.createdAt);
+
+  // Update cache
+  cache.messages[convId] = messages;
+  writeChatCache(cache);
+
+  return messages;
+}
+
+/**
+ * Send a message in a conversation
+ */
+export async function sendChatMessage(
+  convId: string,
+  senderId: string,
+  text: string,
+  messageType: "text" | "sticker" = "text"
+): Promise<ChatMessage> {
+  const conv = await getConversationById(convId);
+  if (!conv) {
+    throw new Error("Conversation not found");
+  }
+
+  if (!conv.participants.includes(senderId)) {
+    throw new Error("Access denied: You are not a participant in this conversation.");
+  }
+
+  // Recipient is the other participant
+  const recipientId = conv.participants.find((p) => p !== senderId) || "";
+  const senderDetail = conv.participantDetails[senderId];
+  const senderName = senderDetail?.name || senderDetail?.username || "User";
+
+  const msgId = "msg_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
+  const now = Date.now();
+  const summaryText = messageType === "sticker" ? "🎨 [স্টিকার]" : text.trim();
+
+  const newMsg: ChatMessage = {
+    id: msgId,
+    conversationId: convId,
+    senderId,
+    senderName,
+    recipientId,
+    text: text.trim(),
+    messageType,
+    createdAt: now,
+    seen: false,
+    seenAt: null,
+  };
+
+  const db = getServerDb();
+  const cache = readChatCache();
+
+  try {
+    const msgDocRef = doc(db, CONVERSATIONS_COLLECTION, convId, "messages", msgId);
+    await setDoc(msgDocRef, newMsg);
+
+    // Update conversation lastMessage
+    const convDocRef = doc(db, CONVERSATIONS_COLLECTION, convId);
+    await updateDoc(convDocRef, {
+      lastMessage: {
+        text: summaryText,
+        senderId,
+        createdAt: now,
+        seen: false,
+      },
+      updatedAt: now,
+    });
+  } catch (err) {
+    console.warn("[Store] Error saving message to Firestore:", err);
+  }
+
+  // Update cache
+  if (!cache.messages[convId]) {
+    cache.messages[convId] = [];
+  }
+  cache.messages[convId].push(newMsg);
+  if (cache.conversations[convId]) {
+    cache.conversations[convId].lastMessage = {
+      text: summaryText,
+      senderId,
+      createdAt: now,
+      seen: false,
+    };
+    cache.conversations[convId].updatedAt = now;
+  }
+  writeChatCache(cache);
+
+  return newMsg;
+}
+
+/**
+ * Mark messages in a conversation as seen (WhatsApp double tick trigger)
+ */
+export async function markConversationAsSeen(
+  convId: string,
+  readerId: string
+): Promise<number> {
+  const conv = await getConversationById(convId);
+  if (!conv || !conv.participants.includes(readerId)) {
+    return 0;
+  }
+
+  const db = getServerDb();
+  const cache = readChatCache();
+  const now = Date.now();
+  let updatedCount = 0;
+
+  try {
+    const msgsRef = collection(db, CONVERSATIONS_COLLECTION, convId, "messages");
+    const snap = await getDocs(msgsRef);
+
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      // Only mark messages sent TO readerId that are not seen yet
+      if (data.recipientId === readerId && !data.seen) {
+        await updateDoc(docSnap.ref, {
+          seen: true,
+          seenAt: now,
+        });
+        updatedCount++;
+      }
+    }
+
+    // Update lastMessage seen if it was sent by someone else
+    if (conv.lastMessage && conv.lastMessage.senderId !== readerId) {
+      const convDocRef = doc(db, CONVERSATIONS_COLLECTION, convId);
+      await updateDoc(convDocRef, {
+        "lastMessage.seen": true,
+      });
+    }
+  } catch (err) {
+    console.warn("[Store] Error updating seen status in Firestore:", err);
+  }
+
+  // Update cache
+  if (cache.messages[convId]) {
+    cache.messages[convId].forEach((m) => {
+      if (m.recipientId === readerId && !m.seen) {
+        m.seen = true;
+        m.seenAt = now;
+        updatedCount++;
+      }
+    });
+  }
+  if (cache.conversations[convId]?.lastMessage && cache.conversations[convId].lastMessage?.senderId !== readerId) {
+    cache.conversations[convId].lastMessage!.seen = true;
+  }
+  writeChatCache(cache);
+
+  return updatedCount;
+}
+
+/**
+ * Get total unread message count for a user across all chats
+ */
+export async function getTotalUnreadCountForUser(
+  userId: string,
+  username?: string
+): Promise<number> {
+  const conversations = await getConversationsForUser(userId, username);
+  return conversations.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+}
+
 

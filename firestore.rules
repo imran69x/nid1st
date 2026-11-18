@@ -23,6 +23,14 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Conversations and messages collection
+    match /conversations/{convId} {
+      allow read, write: if true;
+      match /messages/{messageId} {
+        allow read, write: if true;
+      }
+    }
+
     // Deny all other access by default
     match /{document=**} {
       allow read, write: if false;

@@ -5,6 +5,7 @@ import { UserAuthProvider } from "@/lib/services/userAuthContext";
 import { HeaderAndSidebar } from "@/components/layout/HeaderAndSidebar";
 import { AccountLockedModal } from "@/components/auth/AccountLockedModal";
 import { DailyWelcomeModal } from "@/components/layout/DailyWelcomeModal";
+import { ChatNotificationManager } from "@/components/chat/ChatNotificationManager";
 import { Toaster } from "react-hot-toast";
 
 const inter = Inter({
@@ -43,6 +44,7 @@ export default function RootLayout({
           <Toaster position="top-right" toastOptions={{ duration: 3000 }} />
           <AccountLockedModal />
           <DailyWelcomeModal />
+          <ChatNotificationManager />
           <HeaderAndSidebar />
           <main className="flex-1">{children}</main>
           <footer className="py-4 border-t border-slate-200/80 bg-white/70 text-center text-xs text-slate-500">

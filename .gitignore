@@ -28,6 +28,7 @@ yarn-error.log*
 .env
 data/users.json
 data/config.json
+data/chats_cache.json
 
 # typescript
 *.tsbuildinfo
